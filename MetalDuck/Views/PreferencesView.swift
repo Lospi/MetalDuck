@@ -118,11 +118,21 @@ struct PreferencesView: View {
 
                     resolutionWarning
 
+                    Toggle("2x Upscale", isOn: $upscaleSettings.spatialUpscaleEnabled)
+
                     Stepper("Multiplier: \(upscaleSettings.interpolationMultiplier)x",
                             value: $upscaleSettings.interpolationMultiplier,
                             in: 2...4, step: 1)
+                        .disabled(upscaleSettings.spatialUpscaleEnabled)
 
-                    if upscaleSettings.interpolationMultiplier > 2 {
+                    if upscaleSettings.spatialUpscaleEnabled {
+                        Label(
+                            "2x upscale uses one interpolated frame, so output cadence is fixed at 2x.",
+                            systemImage: "info.circle"
+                        )
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                    } else if upscaleSettings.interpolationMultiplier > 2 {
                         Label(
                             "Multipliers above 2x may cause worse performance, quality, or latency. 2x is recommended.",
                             systemImage: "exclamationmark.triangle"
@@ -166,10 +176,18 @@ struct PreferencesView: View {
             restartCaptureIfNeeded()
         }
         .onChange(of: upscaleSettings.interpolationMultiplier) { _, _ in
+            guard !upscaleSettings.spatialUpscaleEnabled else { return }
             AppCoordinator.shared.updateUpscaleSettings(upscaleSettings)
             restartCaptureIfNeeded()
         }
         .onChange(of: upscaleSettings.processingResolution) { _, _ in
+            AppCoordinator.shared.updateUpscaleSettings(upscaleSettings)
+            restartCaptureIfNeeded()
+        }
+        .onChange(of: upscaleSettings.spatialUpscaleEnabled) { _, newValue in
+            if newValue && upscaleSettings.interpolationMultiplier != 2 {
+                upscaleSettings.interpolationMultiplier = 2
+            }
             AppCoordinator.shared.updateUpscaleSettings(upscaleSettings)
             restartCaptureIfNeeded()
         }
@@ -192,6 +210,9 @@ struct PreferencesView: View {
                 targetType = "Display"
             }
             showDebugHUD = AppCoordinator.shared.overlayManager?.showDebugOverlay ?? true
+            if upscaleSettings.spatialUpscaleEnabled && upscaleSettings.interpolationMultiplier != 2 {
+                upscaleSettings.interpolationMultiplier = 2
+            }
             loadAvailableTargets()
         }
     }

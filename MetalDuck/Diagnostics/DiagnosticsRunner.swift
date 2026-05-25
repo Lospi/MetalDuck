@@ -82,6 +82,7 @@ final class DiagnosticsRunner {
     var frameInterpIsSupported = VTLowLatencyFrameInterpolationConfiguration.isSupported
     var superResIsSupported = VTLowLatencySuperResolutionScalerConfiguration.isSupported
     var frameInterpolationResults: [FrameInterpolationResult] = ProcessingResolution.allCases.map { .init(resolution: $0) }
+    var spatialFrameInterpolationResults: [FrameInterpolationResult] = ProcessingResolution.allCases.map { .init(resolution: $0) }
     var superResolutionEntries: [SuperResolutionEntry] = []
     var reportText = ""
 
@@ -92,6 +93,7 @@ final class DiagnosticsRunner {
         isRunning = true
         reportText = ""
         frameInterpolationResults = ProcessingResolution.allCases.map { .init(resolution: $0) }
+        spatialFrameInterpolationResults = ProcessingResolution.allCases.map { .init(resolution: $0) }
         superResolutionEntries = []
 
         currentStep = "Collecting device info..."
@@ -104,9 +106,22 @@ final class DiagnosticsRunner {
                 currentStep = "Testing Frame Interpolation @ \(res.rawValue)..."
                 frameInterpolationResults[i].status = await testFrameInterpolation(resolution: res)
             }
+
+            for i in spatialFrameInterpolationResults.indices {
+                let res = spatialFrameInterpolationResults[i].resolution
+                spatialFrameInterpolationResults[i].status = .running
+                currentStep = "Testing Frame Interpolation + 2x Upscale @ \(res.rawValue)..."
+                spatialFrameInterpolationResults[i].status = await testFrameInterpolation(
+                    resolution: res,
+                    spatialUpscale: true
+                )
+            }
         } else {
             for i in frameInterpolationResults.indices {
                 frameInterpolationResults[i].status = .hardwareUnsupported
+            }
+            for i in spatialFrameInterpolationResults.indices {
+                spatialFrameInterpolationResults[i].status = .hardwareUnsupported
             }
         }
 
@@ -164,7 +179,10 @@ final class DiagnosticsRunner {
 
     /// Loads the VT frame interpolation model at the given resolution and measures load time.
     /// Feeds synthetic (black) frames in a loop until the model reports ready or failed.
-    private func testFrameInterpolation(resolution: ProcessingResolution) async -> TestStatus {
+    private func testFrameInterpolation(
+        resolution: ProcessingResolution,
+        spatialUpscale: Bool = false
+    ) async -> TestStatus {
         let dims = resolution.dimensions
         let inputDims = CMVideoDimensions(width: Int32(dims.width), height: Int32(dims.height))
 
@@ -174,7 +192,8 @@ final class DiagnosticsRunner {
                 numFrames: 1,
                 inputDimensions: inputDims,
                 maxWidth: dims.width,
-                maxHeight: dims.height
+                maxHeight: dims.height,
+                spatialUpscale: spatialUpscale
             )
             try await interpolator.start()
         } catch {
@@ -305,6 +324,25 @@ final class DiagnosticsRunner {
                 let dimStr = "\(dims.width)×\(dims.height)"
                 let (statusStr, noteStr) = reportStatus(result.status)
                 lines.append("| \(result.resolution.rawValue) | \(dimStr) | \(statusStr) | \(noteStr) |")
+            }
+        }
+        lines.append("")
+
+        // Frame interpolation + spatial upscale section
+        lines.append("### Frame Interpolation + 2x Upscale (`VTLowLatencyFrameInterpolation`)")
+        if !frameInterpIsSupported {
+            lines.append("")
+            lines.append("❌ Not supported on this hardware/OS version.")
+        } else {
+            lines.append("")
+            lines.append("| Resolution | Input | Output | Status | Model Load Time |")
+            lines.append("|-----------|-------|--------|--------|----------------|")
+            for result in spatialFrameInterpolationResults {
+                let dims = result.resolution.dimensions
+                let inputStr = "\(dims.width)×\(dims.height)"
+                let outputStr = "\(dims.width * 2)×\(dims.height * 2)"
+                let (statusStr, noteStr) = reportStatus(result.status)
+                lines.append("| \(result.resolution.rawValue) | \(inputStr) | \(outputStr) | \(statusStr) | \(noteStr) |")
             }
         }
         lines.append("")

@@ -33,6 +33,7 @@ actor RealTimeFrameInterpolation {
     let originalDimensions: CMVideoDimensions
     let needsDownscale: Bool
     let spatialScaleFactor: Int
+    let spatialUpscaleEnabled: Bool
 
     let configuration: VTLowLatencyFrameInterpolationConfiguration
     let pixelBufferPool: CVPixelBufferPool          // destination buffers
@@ -54,6 +55,7 @@ actor RealTimeFrameInterpolation {
 
     init(numFrames: Int, inputDimensions: CMVideoDimensions, maxWidth: Int, maxHeight: Int, spatialUpscale: Bool = false) throws {
         // When spatial upscale is enabled, only 1 interpolated frame is supported
+        self.spatialUpscaleEnabled = spatialUpscale
         self.spatialScaleFactor = spatialUpscale ? 2 : 1
         self.numFrames = spatialUpscale ? 1 : min(3, numFrames)
         self.originalDimensions = inputDimensions
@@ -148,6 +150,9 @@ actor RealTimeFrameInterpolation {
     func process(currentBuffer: CVPixelBuffer, currentTimestamp: CMTime) async throws -> [CVPixelBuffer] {
         guard sessionStarted else {
             throw Fault.sessionNotStarted
+        }
+        guard !modelFailed else {
+            return [currentBuffer]
         }
 
         // Downscale + verify source buffer
@@ -305,6 +310,18 @@ actor RealTimeFrameInterpolation {
         let ptsScale = lastPTS.timescale
 
         var frames: [VTFrameProcessorFrame] = []
+        if spatialUpscaleEnabled {
+            // In spatial mode VideoToolbox also writes an upscaled output for
+            // the first frame in the pair. Without this destination, the stream
+            // would mix scaled interpolated frames with unscaled original frames.
+            let pts = CMTime(seconds: CMTimeGetSeconds(firstPTS), preferredTimescale: ptsScale)
+            let pixelBuffer = try Self.createPixelBuffer(from: pixelBufferPool)
+            guard let frame = VTFrameProcessorFrame(buffer: pixelBuffer, presentationTimeStamp: pts) else {
+                throw Fault.failedToCreateFrames
+            }
+            frames.append(frame)
+        }
+
         for interval in interpolationIntervals {
             let ptsValue = ptsRange * interval
             let pts = CMTime(seconds: ptsValue + CMTimeGetSeconds(firstPTS), preferredTimescale: ptsScale)
