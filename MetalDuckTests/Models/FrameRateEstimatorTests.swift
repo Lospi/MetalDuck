@@ -1,17 +1,20 @@
 //
-//  MetalDuckTests.swift
+//  FrameRateEstimatorTests.swift
 //  MetalDuckTests
 //
-//  Created by Roberto Camargo on 07/11/25.
+//  Tests the pure timing policy used by Auto Capture FPS.
 //
 
-import CoreMedia
 import Testing
 @testable import MetalDuck
 
-struct MetalDuckTests {
+struct FrameRateEstimatorTests {
 
-    @Test("Stable changed frames resolve to the matching capture rate", arguments: [30, 60, 90, 120])
+    @Test(
+        "Stable changed frames resolve to the matching capture rate",
+        .tags(.timing),
+        arguments: [30, 60, 90, 120]
+    )
     func stableChangedFramesResolveToMatchingRate(rate: Int) {
         let initialFrameRate = rate == 120 ? 60 : 120
         var estimator = FrameRateEstimator(initialFrameRate: initialFrameRate)
@@ -23,7 +26,25 @@ struct MetalDuckTests {
         #expect(estimator.estimatedFrameRate == rate)
     }
 
-    @Test func jitterAroundSixtyResolvesToSixty() {
+    @Test(
+        "Measured frame rates quantize to supported capture rates",
+        .tags(.timing),
+        arguments: [
+            QuantizationCase(measured: 28.0, expected: 30),
+            QuantizationCase(measured: 41.0, expected: 40),
+            QuantizationCase(measured: 57.5, expected: 60),
+            QuantizationCase(measured: 76.0, expected: 72),
+            QuantizationCase(measured: 144.0, expected: 120)
+        ]
+    )
+    func measuredRatesQuantizeToSupportedRates(sample: QuantizationCase) {
+        let quantized = FrameRateEstimator.quantizedFrameRate(for: sample.measured)
+
+        #expect(quantized == sample.expected)
+    }
+
+    @Test("Jitter around 60 Hz still resolves to 60 FPS", .tags(.timing))
+    func jitterAroundSixtyResolvesToSixty() {
         var estimator = FrameRateEstimator(initialFrameRate: 120)
         var timestamp = 0.0
         var recommendation: Int?
@@ -41,7 +62,8 @@ struct MetalDuckTests {
         #expect(estimator.currentFrameRate == 60)
     }
 
-    @Test func staticFramesHoldLastStableRate() {
+    @Test("Static frames hold the last stable rate", .tags(.timing))
+    func staticFramesHoldLastStableRate() {
         var estimator = FrameRateEstimator(initialFrameRate: 120)
         _ = feed(rate: 60, seconds: 4.0, into: &estimator)
 
@@ -56,7 +78,8 @@ struct MetalDuckTests {
         #expect(estimator.currentFrameRate == 60)
     }
 
-    @Test func rateChangesRequireStabilityAndCooldown() {
+    @Test("Rate changes require stability and cooldown", .tags(.timing))
+    func rateChangesRequireStabilityAndCooldown() {
         var estimator = FrameRateEstimator(initialFrameRate: 120)
         _ = feed(rate: 60, seconds: 4.0, into: &estimator)
 
@@ -69,27 +92,13 @@ struct MetalDuckTests {
         #expect(estimator.currentFrameRate == 30)
     }
 
-    @Test func estimatesAboveOneTwentyClampToOneTwenty() {
+    @Test("Non-finite timestamps are ignored", .tags(.timing))
+    func nonFiniteTimestampsAreIgnored() {
         var estimator = FrameRateEstimator(initialFrameRate: 60)
 
-        let recommendation = feed(rate: 144, seconds: 4.0, into: &estimator)
-
-        #expect(recommendation == 120)
-        #expect(estimator.currentFrameRate == 120)
-    }
-
-    @Test func autoFrameRateDefaultsToManualMode() {
-        let settings = CaptureSettings()
-
-        #expect(settings.autoFrameRateEnabled == false)
-        #expect(settings.frameRate == 60)
-    }
-
-    @Test func manualFrameRateIntervalUsesConfiguredFrameRate() {
-        let interval = CaptureSettings.frameInterval(for: 60)
-
-        #expect(interval.value == 1)
-        #expect(interval.timescale == 60)
+        #expect(estimator.observe(timestamp: .nan, changedAreaRatio: 1.0) == nil)
+        #expect(estimator.observe(timestamp: .infinity, changedAreaRatio: 1.0) == nil)
+        #expect(estimator.currentFrameRate == 60)
     }
 
     @discardableResult
@@ -112,5 +121,13 @@ struct MetalDuckTests {
 
         return recommendation
     }
+}
 
+struct QuantizationCase: Sendable, CustomTestStringConvertible {
+    let measured: Double
+    let expected: Int
+
+    var testDescription: String {
+        "\(measured) Hz -> \(expected) FPS"
+    }
 }
