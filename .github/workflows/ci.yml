@@ -35,4 +35,5 @@ jobs:
           -scheme MetalDuck
           -destination 'platform=macOS'
           -derivedDataPath "$RUNNER_TEMP/MetalDuckDerivedData"
+          -only-testing:MetalDuckTests
           CODE_SIGNING_ALLOWED=NO
