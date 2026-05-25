@@ -10,8 +10,19 @@ import Testing
 
 struct MetalDuckTests {
 
-    @Test func example() async throws {
-        // Write your test here and use APIs like `#expect(...)` to check expected conditions.
+    @Test func targetFrameRateUsesInterpolationMultiplier() {
+        var settings = UpscaleSettings()
+        settings.interpolationMultiplier = 3
+
+        #expect(settings.targetFrameRate(sourceFrameRate: 30) == 90)
+    }
+
+    @Test func targetFrameRateUsesTwoTimesCadenceWhenSpatialUpscaleIsEnabled() {
+        var settings = UpscaleSettings()
+        settings.interpolationMultiplier = 4
+        settings.spatialUpscaleEnabled = true
+
+        #expect(settings.targetFrameRate(sourceFrameRate: 30) == 60)
     }
 
 }
