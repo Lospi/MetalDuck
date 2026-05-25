@@ -52,15 +52,14 @@ class VideoToolboxUpscaler {
 
     @available(macOS 14.0, *)
     private func setupAdvancedFeatures() {
-        print("🎬 VideoToolboxUpscaler: Setting up advanced features")
-        print("   Mode: \(settings.mode)")
+        guard settings.superResolutionEnabled || settings.mode == .superResolution else {
+            return
+        }
+
+        print("🎬 VideoToolboxUpscaler: Setting up Super Resolution")
         print("   Source Resolution: \(Int(settings.sourceResolution.width))x\(Int(settings.sourceResolution.height))")
         print("   Target Resolution: \(Int(settings.targetResolution.width))x\(Int(settings.targetResolution.height))")
-
-        if settings.superResolutionEnabled || settings.mode == .superResolution {
-            print("   ✅ Enabling Super Resolution")
-            setupSuperResolutionScaler()
-        }
+        setupSuperResolutionScaler()
     }
 
     @available(macOS 14.0, *)
