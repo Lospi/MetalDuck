@@ -1,0 +1,38 @@
+name: CI
+
+on:
+  pull_request:
+    branches:
+      - main
+      - v0.2
+  push:
+    branches:
+      - main
+      - v0.2
+
+jobs:
+  build-and-test:
+    name: Build and Test
+    runs-on: macos-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Show Xcode version
+        run: xcodebuild -version
+
+      - name: Build MetalDuck
+        run: >
+          xcodebuild build
+          -scheme MetalDuck
+          -destination 'platform=macOS'
+          -derivedDataPath "$RUNNER_TEMP/MetalDuckDerivedData"
+          CODE_SIGNING_ALLOWED=NO
+
+      - name: Run tests
+        run: >
+          xcodebuild test
+          -scheme MetalDuck
+          -destination 'platform=macOS'
+          -derivedDataPath "$RUNNER_TEMP/MetalDuckDerivedData"
+          CODE_SIGNING_ALLOWED=NO
