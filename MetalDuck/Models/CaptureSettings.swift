@@ -5,6 +5,7 @@
 //  Created by Roberto Camargo on 07/11/25.
 //
 
+import CoreMedia
 import Foundation
 import ScreenCaptureKit
 
@@ -28,14 +29,23 @@ struct CaptureSettings: Codable {
     var targetDisplayID: CGDirectDisplayID?
     var captureResolution: CGSize
     var frameRate: Int
+    var autoFrameRateEnabled: Bool
     var useVirtualDisplay: Bool
     var selectedDynamicRangePreset: DynamicRangePreset?
+
+    static let autoFrameRateSamplingCeiling = 120
     
     init() {
         self.captureResolution = CGSize(width: 1920, height: 1080)
         self.frameRate = 60
+        self.autoFrameRateEnabled = false
         self.useVirtualDisplay = false
         self.selectedDynamicRangePreset = nil
+    }
+
+    static func frameInterval(for frameRate: Int) -> CMTime {
+        let clampedFrameRate = max(1, frameRate)
+        return CMTime(value: 1, timescale: CMTimeScale(clampedFrameRate))
     }
     
     @available(macOS 12.3, *)
@@ -66,4 +76,3 @@ struct CaptureSettings: Codable {
         return nil
     }
 }
-

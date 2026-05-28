@@ -83,9 +83,21 @@ struct PreferencesView: View {
                     }
                 }
 
+                Toggle("Auto Capture FPS", isOn: $captureSettings.autoFrameRateEnabled)
+
                 Stepper("Capture FPS: \(captureSettings.frameRate)",
                         value: $captureSettings.frameRate,
                         in: 30...120, step: 30)
+                    .disabled(captureSettings.autoFrameRateEnabled)
+
+                if captureSettings.autoFrameRateEnabled {
+                    Label(
+                        "Auto mode samples up to 120 FPS, then adjusts capture to the detected game rate.",
+                        systemImage: "gauge.with.dots.needle.50percent"
+                    )
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+                }
 
                 HStack {
                     Button("Refresh") {
@@ -174,6 +186,15 @@ struct PreferencesView: View {
             restartCaptureIfNeeded()
         }
         .onChange(of: captureSettings.frameRate) { _, _ in
+            AppCoordinator.shared.updateCaptureSettings(captureSettings)
+            guard !captureSettings.autoFrameRateEnabled else { return }
+            restartCaptureIfNeeded()
+        }
+        .onChange(of: captureSettings.autoFrameRateEnabled) { _, newValue in
+            if newValue {
+                captureSettings.frameRate = CaptureSettings.autoFrameRateSamplingCeiling
+            }
+            AppCoordinator.shared.updateCaptureSettings(captureSettings)
             restartCaptureIfNeeded()
         }
         .sheet(isPresented: $showDiagnostics) {
