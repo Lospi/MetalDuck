@@ -245,31 +245,7 @@ class AppCoordinator {
                             updateFPS()
                         }
                     } else if await interpolator?.modelFailed ?? false {
-                        // Model timed out — auto-fallback to lower resolution
-                        let current = processingResolution
-                        if let lower = current.lowerResolution {
-                            print("   🔄 \(current.rawValue) unsupported, falling back to \(lower.rawValue)")
-                            appState.processingStatus = "\(current.rawValue) unsupported, using \(lower.rawValue)"
-                            activeProcessingResolution = lower
-                            await interpolator?.stop()
-                            interpolator = nil
-                            // Next frame will recreate with lower resolution
-                        } else if spatialUpscaleEnabled {
-                            let fallbackResolution = DeviceCapabilityDatabase.shared.recommendedFrameInterpolationResolution()
-                                ?? .p720
-                            print("   🔄 2x upscale unsupported, falling back to plain interpolation at \(fallbackResolution.rawValue)")
-                            appState.processingStatus = "2x upscale unsupported, using plain interpolation"
-                            activeSpatialUpscaleEnabled = false
-                            activeProcessingResolution = fallbackResolution
-                            await interpolator?.stop()
-                            interpolator = nil
-                            passthroughFrameCount = 0
-                        } else {
-                            appState.processingStatus = "Interpolation unsupported on this device"
-                            interpolationUnsupported = true
-                            await interpolator?.stop()
-                            interpolator = nil
-                        }
+                        await advanceInterpolationFallback()
                         overlay.displayBufferImmediate(frame.pixelBuffer)
                         updateFPS()
                     } else {
@@ -283,7 +259,12 @@ class AppCoordinator {
                     return
                 }
             } catch {
-                // Fallback to passthrough on error
+                guard !Task.isCancelled, appState.isCapturing else { return }
+                print("   Frame interpolation failed: \(error.localizedDescription)")
+                await advanceInterpolationFallback()
+                overlay.displayBufferImmediate(frame.pixelBuffer)
+                updateFPS()
+                return
             }
         }
 
@@ -338,6 +319,31 @@ class AppCoordinator {
             overlay.createDisplayWindow(contentSize: captureSize)
             overlay.show()
             print("   🖥️ Standalone window mode")
+        }
+    }
+
+    private func advanceInterpolationFallback() async {
+        let current = InterpolationFallback(
+            resolution: activeProcessingResolution ?? upscaleSettings.processingResolution,
+            spatialUpscaleEnabled: activeSpatialUpscaleEnabled ?? upscaleSettings.spatialUpscaleEnabled
+        )
+        let recommended = DeviceCapabilityDatabase.shared.recommendedFrameInterpolationResolution() ?? .p720
+        let requested = upscaleSettings.processingResolution
+        let plainResolution = requested.dimensions.width < recommended.dimensions.width ? requested : recommended
+        let next = current.next(plainResolution: plainResolution)
+        await interpolator?.stop()
+        interpolator = nil
+        guard !Task.isCancelled, appState.isCapturing else { return }
+        if let next {
+            activeProcessingResolution = next.resolution
+            activeSpatialUpscaleEnabled = next.spatialUpscaleEnabled
+            passthroughFrameCount = 0
+            appState.processingStatus = current.spatialUpscaleEnabled && !next.spatialUpscaleEnabled
+                ? "2x upscale unsupported, using plain interpolation"
+                : "Trying interpolation at \(next.resolution.rawValue)"
+        } else {
+            interpolationUnsupported = true
+            appState.processingStatus = "Interpolation unsupported on this device"
         }
     }
 
