@@ -33,20 +33,17 @@ class VideoToolboxAdvanced {
             return (nil, nil)
         }
         
-        let inputDimensions = CMVideoDimensions(width: Int32(sourceWidth), height: Int32(sourceHeight))
-        
-        // Check dimension constraints
-        if let maximumDimensions = VTLowLatencySuperResolutionScalerConfiguration.maximumDimensions {
-            guard Int32(sourceWidth) <= maximumDimensions.width,
-                  Int32(sourceHeight) <= maximumDimensions.height
-            else {
-                print("Input dimensions exceed maximum supported dimensions")
-                print("Maximum supported dimensions: \(maximumDimensions.width)x\(maximumDimensions.height)")
-                print("Provided dimensions: \(sourceWidth)x\(sourceHeight)")
+        guard sourceWidth > 0, sourceHeight > 0 else { return (nil, nil) }
+
+        // Retain legacy bounds on macOS 26; macOS 27 uses scale-specific limits below.
+        if #unavailable(macOS 27.0),
+           let maximumDimensions = VTLowLatencySuperResolutionScalerConfiguration.maximumDimensions {
+            guard sourceWidth <= Int(maximumDimensions.width),
+                  sourceHeight <= Int(maximumDimensions.height) else {
                 return (nil, nil)
             }
         }
-        
+
         if let minimumDimensions = VTLowLatencySuperResolutionScalerConfiguration.minimumDimensions {
             guard Int32(sourceWidth) >= minimumDimensions.width,
                   Int32(sourceHeight) >= minimumDimensions.height
@@ -64,9 +61,8 @@ class VideoToolboxAdvanced {
         let actualScaleFactor = min(scaleFactor, heightScaleFactor)
         
         // Get supported scale factors
-        let supportedScaleFactors = VTLowLatencySuperResolutionScalerConfiguration.supportedScaleFactors(
-            frameWidth: sourceWidth,
-            frameHeight: sourceHeight
+        let supportedScaleFactors = VideoProcessingCapabilities.superResolutionScaleFactors(
+            width: sourceWidth, height: sourceHeight
         )
         
         // Find the closest supported scale factor

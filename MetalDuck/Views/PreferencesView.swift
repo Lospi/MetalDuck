@@ -239,6 +239,26 @@ struct PreferencesView: View {
 
     @ViewBuilder
     private var resolutionWarning: some View {
+        let dims = upscaleSettings.processingResolution.dimensions
+        let capability = VideoProcessingCapabilities.interpolation(
+            spatialScaleFactor: upscaleSettings.spatialUpscaleEnabled ? 2 : 1
+        )
+        if let allowed = capability.allows(width: dims.width, height: dims.height) {
+            Label(
+                allowed
+                    ? "Within macOS-reported limits. Run Diagnostics to verify processing."
+                    : "Outside macOS-reported limits. A fallback will be used.",
+                systemImage: allowed ? "info.circle" : "exclamationmark.triangle"
+            )
+            .font(.caption)
+            .foregroundColor(allowed ? Color.secondary : Color.orange)
+        } else {
+            historicalResolutionWarning
+        }
+    }
+
+    @ViewBuilder
+    private var historicalResolutionWarning: some View {
         let db = DeviceCapabilityDatabase.shared
         let support = db.frameInterpolationSupport(for: upscaleSettings.processingResolution)
         let recommended = db.recommendedFrameInterpolationResolution()

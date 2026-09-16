@@ -60,7 +60,7 @@ struct DiagnosticsView: View {
             VStack(spacing: 6) {
                 Text("Device Capability Test")
                     .font(.title3.bold())
-                Text("Tests which processing resolutions your device supports for\nFrame Interpolation, 2x Upscale, and Super Resolution.")
+                Text("Tests which processing resolutions your device supports for\nFrame Interpolation and 2x Upscale; queries Super Resolution limits.")
                     .multilineTextAlignment(.center)
                     .foregroundColor(.secondary)
                     .font(.callout)
@@ -101,9 +101,11 @@ struct DiagnosticsView: View {
 
     private var completedView: some View {
         VStack(alignment: .leading, spacing: 16) {
+            Text("Synthetic processing tests confirm output, not sustained FPS or visual quality.")
+                .font(.caption).foregroundColor(.secondary)
+                .padding(.horizontal, 20).padding(.top, 16)
             resultsTable
                 .padding(.horizontal, 20)
-                .padding(.top, 16)
 
             Divider()
                 .padding(.horizontal, 20)
@@ -129,12 +131,13 @@ struct DiagnosticsView: View {
         VStack(alignment: .leading, spacing: 8) {
             Label("Frame Interpolation", systemImage: "film.stack")
                 .font(.subheadline.bold())
+            Text(runner.interpolationCapability.summary).font(.caption).foregroundColor(.secondary)
 
             if !runner.frameInterpIsSupported {
                 unsupportedBadge("Not supported on this hardware")
             } else {
                 VStack(spacing: 0) {
-                    tableHeader(["Resolution", "Dimensions", "Status", "Load Time"])
+                    tableHeader(["Resolution", "Dimensions", "Status", "First Output"])
                     ForEach(runner.frameInterpolationResults) { result in
                         Divider()
                         resultRow(result)
@@ -166,7 +169,7 @@ struct DiagnosticsView: View {
         let color: Color
         switch status {
         case .supported(let t):
-            text = String(format: "%.1f s", t)
+            text = String(format: "%.3f s", t)
             color = .secondary
         default:
             text = "—"
@@ -185,12 +188,13 @@ struct DiagnosticsView: View {
         VStack(alignment: .leading, spacing: 8) {
             Label("Frame Interpolation + 2x Upscale", systemImage: "arrow.up.left.and.arrow.down.right")
                 .font(.subheadline.bold())
+            Text(runner.spatialInterpolationCapability.summary).font(.caption).foregroundColor(.secondary)
 
             if !runner.frameInterpIsSupported {
                 unsupportedBadge("Not supported on this hardware")
             } else {
                 VStack(spacing: 0) {
-                    tableHeader(["Resolution", "Input", "Output", "Status", "Load Time"])
+                    tableHeader(["Resolution", "Input", "Output", "Status", "First Output"])
                     ForEach(runner.spatialFrameInterpolationResults) { result in
                         Divider()
                         spatialResultRow(result)
@@ -224,6 +228,12 @@ struct DiagnosticsView: View {
         VStack(alignment: .leading, spacing: 8) {
             Label("Super Resolution", systemImage: "sparkles")
                 .font(.subheadline.bold())
+            Text("OS-reported support; processing was not tested.")
+                .font(.caption).foregroundColor(.secondary)
+            ForEach(runner.superResolutionCapabilities) { entry in
+                Text("\(entry.scaleFactor, specifier: "%.1f")x: \(entry.capability.summary)")
+                    .font(.caption).foregroundColor(.secondary)
+            }
 
             if !runner.superResIsSupported {
                 unsupportedBadge("Not supported on this hardware")
@@ -351,7 +361,7 @@ struct DiagnosticsView: View {
         case .supported:
             Image(systemName: "checkmark.circle.fill")
                 .foregroundColor(.green)
-        case .unsupported:
+        case .unsupported, .capabilityRejected:
             Image(systemName: "xmark.circle.fill")
                 .foregroundColor(.red)
         case .hardwareUnsupported:
@@ -367,8 +377,9 @@ struct DiagnosticsView: View {
         switch status {
         case .pending:              return "Pending"
         case .running:              return "Testing..."
-        case .supported:            return "Supported"
-        case .unsupported:          return "Unsupported"
+        case .supported:            return "Produced frames"
+        case .unsupported:          return "Timed out"
+        case .capabilityRejected:   return "OS limit (skipped)"
         case .hardwareUnsupported:  return "N/A"
         case .failed:               return "Error"
         }

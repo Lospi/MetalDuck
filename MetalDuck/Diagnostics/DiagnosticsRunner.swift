@@ -45,6 +45,7 @@ final class DiagnosticsRunner {
         case running
         case supported(loadTime: Double)
         case unsupported
+        case capabilityRejected
         case hardwareUnsupported
         case failed(String)
     }
@@ -62,6 +63,12 @@ final class DiagnosticsRunner {
         let inputHeight: Int
         var isSupported: Bool = false
         var supportedScaleFactors: [Float] = []
+    }
+
+    struct ScaleCapability: Identifiable {
+        var id: Float { scaleFactor }
+        let scaleFactor: Float
+        let capability: VideoProcessingCapability
     }
 
     struct DeviceInfo {
@@ -84,6 +91,9 @@ final class DiagnosticsRunner {
     var frameInterpolationResults: [FrameInterpolationResult] = ProcessingResolution.allCases.map { .init(resolution: $0) }
     var spatialFrameInterpolationResults: [FrameInterpolationResult] = ProcessingResolution.allCases.map { .init(resolution: $0) }
     var superResolutionEntries: [SuperResolutionEntry] = []
+    var interpolationCapability: VideoProcessingCapability = .unavailable
+    var spatialInterpolationCapability: VideoProcessingCapability = .unavailable
+    var superResolutionCapabilities: [ScaleCapability] = []
     var reportText = ""
 
     // MARK: - Run
@@ -98,6 +108,17 @@ final class DiagnosticsRunner {
 
         currentStep = "Collecting device info..."
         deviceInfo = collectDeviceInfo()
+        frameInterpIsSupported = VTLowLatencyFrameInterpolationConfiguration.isSupported
+        superResIsSupported = VTLowLatencySuperResolutionScalerConfiguration.isSupported
+        interpolationCapability = VideoProcessingCapabilities.interpolation(spatialScaleFactor: 1)
+        spatialInterpolationCapability = VideoProcessingCapabilities.interpolation(spatialScaleFactor: 2)
+        if #available(macOS 27.0, *) {
+            superResolutionCapabilities = VTLowLatencySuperResolutionScalerConfiguration.supportedScaleFactors.map {
+                ScaleCapability(scaleFactor: $0, capability: VideoProcessingCapabilities.superResolution(scaleFactor: $0))
+            }
+        } else {
+            superResolutionCapabilities = []
+        }
 
         if frameInterpIsSupported {
             for i in frameInterpolationResults.indices {
@@ -184,6 +205,10 @@ final class DiagnosticsRunner {
         spatialUpscale: Bool = false
     ) async -> TestStatus {
         let dims = resolution.dimensions
+        let capability = spatialUpscale ? spatialInterpolationCapability : interpolationCapability
+        guard capability.allows(width: dims.width, height: dims.height) != false else {
+            return .capabilityRejected
+        }
         let inputDims = CMVideoDimensions(width: Int32(dims.width), height: Int32(dims.height))
 
         let interpolator: RealTimeFrameInterpolation
@@ -215,20 +240,30 @@ final class DiagnosticsRunner {
                 return .failed("Buffer allocation failed")
             }
 
+            let outputs: [CVPixelBuffer]
             do {
-                _ = try await interpolator.process(currentBuffer: srcBuffer, currentTimestamp: pts)
+                outputs = try await interpolator.process(currentBuffer: srcBuffer, currentTimestamp: pts)
             } catch {
                 await interpolator.stop()
                 return .failed(error.localizedDescription)
             }
 
             if await interpolator.modelReady {
+                let scale = spatialUpscale ? 2 : 1
+                guard outputs.count == (spatialUpscale ? 2 : 1),
+                      outputs.allSatisfy({
+                          CVPixelBufferGetWidth($0) == dims.width * scale &&
+                          CVPixelBufferGetHeight($0) == dims.height * scale
+                      }) else {
+                    await interpolator.stop()
+                    return .failed("Unexpected processed frame count or dimensions")
+                }
                 let elapsed = Date().timeIntervalSince(startTime)
                 await interpolator.stop()
                 return .supported(loadTime: elapsed)
             }
 
-            if await interpolator.modelFailed {
+            if await interpolator.modelFailed || Date().timeIntervalSince(startTime) > 6 {
                 await interpolator.stop()
                 return .unsupported
             }
@@ -264,17 +299,15 @@ final class DiagnosticsRunner {
                 inputHeight: input.h
             )
 
-            if let max = maxDims, Int32(input.w) > max.width || Int32(input.h) > max.height {
+            if #unavailable(macOS 27.0),
+               let max = maxDims, Int32(input.w) > max.width || Int32(input.h) > max.height {
                 return entry // isSupported stays false
             }
             if let min = minDims, Int32(input.w) < min.width || Int32(input.h) < min.height {
                 return entry
             }
 
-            let factors = VTLowLatencySuperResolutionScalerConfiguration.supportedScaleFactors(
-                frameWidth: input.w,
-                frameHeight: input.h
-            )
+            let factors = VideoProcessingCapabilities.superResolutionScaleFactors(width: input.w, height: input.h)
             entry.supportedScaleFactors = factors
             entry.isSupported = !factors.isEmpty
             return entry
@@ -310,6 +343,20 @@ final class DiagnosticsRunner {
             lines.append("")
         }
 
+        lines.append("### OS-advertised limits (not a processing test)")
+        lines.append("- **Interpolation, 1x spatial scale:** \(interpolationCapability.summary)")
+        lines.append("- **Interpolation + 2x upscale:** \(spatialInterpolationCapability.summary)")
+        if superResolutionCapabilities.isEmpty {
+            lines.append("- **Super-resolution per-scale limits:** unavailable or no scales advertised.")
+        } else {
+            for entry in superResolutionCapabilities {
+                lines.append("- **Super resolution \(entry.scaleFactor)x:** \(entry.capability.summary)")
+            }
+        }
+        lines.append("")
+        lines.append("Processing tests use synthetic black frames. A pass confirms output count and dimensions, not visual quality, sustained FPS, or gameplay latency. Times measure first output and may include cached model startup.")
+        lines.append("")
+
         // Frame interpolation section
         lines.append("### Frame Interpolation (`VTLowLatencyFrameInterpolation`)")
         if !frameInterpIsSupported {
@@ -317,7 +364,7 @@ final class DiagnosticsRunner {
             lines.append("❌ Not supported on this hardware/OS version.")
         } else {
             lines.append("")
-            lines.append("| Resolution | Dimensions | Status | Model Load Time |")
+            lines.append("| Resolution | Dimensions | Processing result | First Output Time |")
             lines.append("|-----------|-----------|--------|----------------|")
             for result in frameInterpolationResults {
                 let dims = result.resolution.dimensions
@@ -335,7 +382,7 @@ final class DiagnosticsRunner {
             lines.append("❌ Not supported on this hardware/OS version.")
         } else {
             lines.append("")
-            lines.append("| Resolution | Input | Output | Status | Model Load Time |")
+            lines.append("| Resolution | Input | Output | Processing result | First Output Time |")
             lines.append("|-----------|-------|--------|--------|----------------|")
             for result in spatialFrameInterpolationResults {
                 let dims = result.resolution.dimensions
@@ -349,6 +396,7 @@ final class DiagnosticsRunner {
 
         // Super resolution section
         lines.append("### Super Resolution (`VTLowLatencySuperResolutionScaler`)")
+        lines.append("OS capability queries only; model execution and throughput were not tested.")
         if !superResIsSupported {
             lines.append("")
             lines.append("❌ Not supported on this hardware/OS version.")
@@ -356,7 +404,8 @@ final class DiagnosticsRunner {
             lines.append("")
             lines.append("No results available.")
         } else {
-            if let maxDims = VTLowLatencySuperResolutionScalerConfiguration.maximumDimensions {
+            if #unavailable(macOS 27.0),
+               let maxDims = VTLowLatencySuperResolutionScalerConfiguration.maximumDimensions {
                 lines.append("")
                 lines.append("**Maximum input dimensions:** \(maxDims.width)×\(maxDims.height)")
             }
@@ -382,8 +431,9 @@ final class DiagnosticsRunner {
         switch status {
         case .pending:              return ("⏳ Pending", "—")
         case .running:              return ("🔄 Running", "—")
-        case .supported(let t):     return ("✅ Supported", String(format: "%.1f s", t))
-        case .unsupported:          return ("❌ Unsupported", "—")
+        case .supported(let t):     return ("✅ Produced frames", String(format: "%.3f s", t))
+        case .unsupported:          return ("⚠️ Timed out", "No processed output before timeout")
+        case .capabilityRejected:   return ("⏭️ Skipped: OS limits", "Model not started")
         case .hardwareUnsupported:  return ("⚫ N/A", "—")
         case .failed(let msg):      return ("⚠️ Error", msg)
         }

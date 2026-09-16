@@ -13,7 +13,8 @@ on:
 jobs:
   build-and-test:
     name: Build and Test
-    runs-on: macos-latest
+    # Compile against the macOS 27 SDK; the app retains its macOS 26 deployment target.
+    runs-on: xcode-27
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
