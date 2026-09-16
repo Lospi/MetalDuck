@@ -46,6 +46,10 @@ class ScreenCaptureManager: NSObject {
         captureSession = nil
     }
 
+    func updateFrameRate(_ frameRate: Int) async throws {
+        try await captureSession?.updateFrameRate(frameRate)
+    }
+
     // MARK: - Content Picker
 
     func presentPicker() {

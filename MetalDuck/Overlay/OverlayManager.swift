@@ -201,11 +201,30 @@ class OverlayManager {
 
     // MARK: - Debug HUD
 
-    func updateDebugInfo(fps: Double, sourceFPS: Double, status: String, captureRes: CGSize, processingRes: CGSize?, mode: String) {
+    func updateDebugInfo(
+        fps: Double,
+        sourceFPS: Double,
+        effectiveCaptureFPS: Int,
+        autoCaptureFPS: Bool,
+        estimatedGameFPS: Int?,
+        status: String,
+        captureRes: CGSize,
+        processingRes: CGSize?,
+        mode: String
+    ) {
         guard showDebugOverlay, let debugTextField else { return }
 
+        let captureLine: String
+        if autoCaptureFPS {
+            let estimate = estimatedGameFPS.map { "game ~\($0)" } ?? "estimating"
+            captureLine = " Auto Capture: \(effectiveCaptureFPS) FPS (\(estimate)) "
+        } else {
+            captureLine = " Capture: \(effectiveCaptureFPS) FPS "
+        }
+
         var lines = [
-            String(format: " Capture: %.0f → Display: %.0f FPS ", sourceFPS, fps),
+            captureLine,
+            String(format: " Delivered: %.0f → Display: %.0f FPS ", sourceFPS, fps),
             " \(status) ",
             " Capture: \(Int(captureRes.width))x\(Int(captureRes.height)) ",
         ]
