@@ -101,6 +101,24 @@ struct FrameRateEstimatorTests {
         #expect(estimator.currentFrameRate == 60)
     }
 
+    @Test("A capped stream probes and recovers when the game speeds up", .tags(.timing))
+    func cappedStreamRecoversToHigherRate() {
+        var estimator = FrameRateEstimator(initialFrameRate: 120)
+        var captureRate = 120
+        var timestamp = 0.0
+        var didProbe = false
+        while timestamp < 19 {
+            let sourceRate = timestamp < 8 ? 30 : 60
+            timestamp += 1.0 / Double(min(sourceRate, captureRate))
+            if let rate = estimator.observe(timestamp: timestamp, changedAreaRatio: 1) {
+                if timestamp > 8 && rate == 120 { didProbe = true }
+                captureRate = rate
+            }
+        }
+        #expect(didProbe)
+        #expect(captureRate == 60)
+    }
+
     @discardableResult
     private func feed(
         rate: Int,

@@ -43,6 +43,10 @@ struct CaptureSettings: Codable {
         self.selectedDynamicRangePreset = nil
     }
 
+    var initialCaptureFrameRate: Int {
+        autoFrameRateEnabled ? Self.autoFrameRateSamplingCeiling : frameRate
+    }
+
     static func frameInterval(for frameRate: Int) -> CMTime {
         let clampedFrameRate = max(1, frameRate)
         return CMTime(value: 1, timescale: CMTimeScale(clampedFrameRate))

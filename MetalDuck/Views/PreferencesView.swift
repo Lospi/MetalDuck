@@ -190,10 +190,7 @@ struct PreferencesView: View {
             guard !captureSettings.autoFrameRateEnabled else { return }
             restartCaptureIfNeeded()
         }
-        .onChange(of: captureSettings.autoFrameRateEnabled) { _, newValue in
-            if newValue {
-                captureSettings.frameRate = CaptureSettings.autoFrameRateSamplingCeiling
-            }
+        .onChange(of: captureSettings.autoFrameRateEnabled) { _, _ in
             AppCoordinator.shared.updateCaptureSettings(captureSettings)
             restartCaptureIfNeeded()
         }

@@ -19,6 +19,17 @@ struct CaptureSettingsTests {
         #expect(settings.frameRate == 60, "Manual capture should remain 60 FPS by default.")
     }
 
+    @Test("Auto mode preserves the manual FPS selection", .tags(.settings))
+    func autoModePreservesManualSelection() {
+        var settings = CaptureSettings()
+        settings.frameRate = 90
+        settings.autoFrameRateEnabled = true
+        #expect(settings.initialCaptureFrameRate == 120)
+        #expect(settings.frameRate == 90)
+        settings.autoFrameRateEnabled = false
+        #expect(settings.initialCaptureFrameRate == 90)
+    }
+
     @Test("Frame interval uses the configured frame rate", .tags(.settings))
     func frameIntervalUsesConfiguredFrameRate() {
         let interval = CaptureSettings.frameInterval(for: 60)

@@ -38,6 +38,7 @@ class AppCoordinator {
     private var sourceFrameCount = 0
     private var currentSourceFPS: Double = 0
     private var lastFrameTimestamp: CMTime?
+    private var effectiveCaptureFrameRate = 60
     private var frameRateEstimator = FrameRateEstimator(initialFrameRate: 60)
 
     init() {
@@ -96,7 +97,7 @@ class AppCoordinator {
             await matchCaptureResolutionToWindow()
             prepareCaptureFrameRateForStart()
 
-            captureManager = ScreenCaptureManager(settings: captureSettings)
+            captureManager = ScreenCaptureManager(settings: activeCaptureSettings)
 
             do {
                 let stream = try await captureManager!.startCapture()
@@ -277,7 +278,7 @@ class AppCoordinator {
             overlayManager?.updateDebugInfo(
                 fps: fps,
                 sourceFPS: currentSourceFPS,
-                effectiveCaptureFPS: captureSettings.frameRate,
+                effectiveCaptureFPS: effectiveCaptureFrameRate,
                 autoCaptureFPS: captureSettings.autoFrameRateEnabled,
                 estimatedGameFPS: frameRateEstimator.estimatedFrameRate,
                 status: appState.processingStatus,
@@ -330,7 +331,7 @@ class AppCoordinator {
     @available(macOS 12.3, *)
     func presentPicker() {
         if captureManager == nil {
-            captureManager = ScreenCaptureManager(settings: captureSettings)
+            captureManager = ScreenCaptureManager(settings: activeCaptureSettings)
             captureManager?.onPickerFilterSelected = { [weak self] filter in
                 Task { @MainActor in
                     await self?.startCaptureWithFilter(filter)
@@ -349,7 +350,7 @@ class AppCoordinator {
 
         do {
             prepareCaptureFrameRateForStart()
-            captureManager = ScreenCaptureManager(settings: captureSettings)
+            captureManager = ScreenCaptureManager(settings: activeCaptureSettings)
             let stream = try await captureManager!.startCapture()
             // Apply the picked filter to the new session
             await captureManager?.applyPickerFilter(filter)
@@ -378,16 +379,20 @@ class AppCoordinator {
         }
     }
 
+    private var activeCaptureSettings: CaptureSettings {
+        var settings = captureSettings
+        settings.frameRate = effectiveCaptureFrameRate
+        return settings
+    }
+
     private func prepareCaptureFrameRateForStart() {
-        if captureSettings.autoFrameRateEnabled {
-            captureSettings.frameRate = CaptureSettings.autoFrameRateSamplingCeiling
-        }
+        effectiveCaptureFrameRate = captureSettings.initialCaptureFrameRate
         resetAutoFrameRateEstimator()
-        videoToolboxUpscaler?.updateSourceFrameRate(captureSettings.frameRate)
+        videoToolboxUpscaler?.updateSourceFrameRate(effectiveCaptureFrameRate)
     }
 
     private func resetAutoFrameRateEstimator() {
-        frameRateEstimator.reset(initialFrameRate: captureSettings.frameRate)
+        frameRateEstimator.reset(initialFrameRate: effectiveCaptureFrameRate)
     }
 
     private func updateAutoFrameRateIfNeeded(for frame: CapturedFrame) async {
@@ -400,15 +405,18 @@ class AppCoordinator {
             return
         }
 
-        guard recommendedFrameRate != captureSettings.frameRate else { return }
+        guard recommendedFrameRate != effectiveCaptureFrameRate else { return }
 
         do {
-            try await captureManager?.updateFrameRate(recommendedFrameRate)
-            captureSettings.frameRate = recommendedFrameRate
+            guard let captureManager else { return }
+            try await captureManager.updateFrameRate(recommendedFrameRate)
+            guard !Task.isCancelled, appState.isCapturing else { return }
+            effectiveCaptureFrameRate = recommendedFrameRate
             videoToolboxUpscaler?.updateSourceFrameRate(recommendedFrameRate)
             appState.processingStatus = "Auto capture FPS: \(recommendedFrameRate)"
             print("   🎚️ Auto capture FPS adjusted to \(recommendedFrameRate)")
         } catch {
+            resetAutoFrameRateEstimator()
             appState.processingStatus = "Auto capture FPS update failed"
             print("   ⚠️ Auto capture FPS update failed: \(error.localizedDescription)")
         }

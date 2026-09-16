@@ -13,11 +13,13 @@ struct FrameRateEstimator {
     private let windowDuration: TimeInterval
     private let stabilityDuration: TimeInterval
     private let cooldownDuration: TimeInterval
+    private let probeInterval: TimeInterval
     private let minimumChangedAreaRatio: Double
     private var changedFrameTimestamps: [TimeInterval] = []
     private var candidateFrameRate: Int?
     private var candidateStartTime: TimeInterval?
     private var lastRecommendationTime: TimeInterval?
+    private var samplingStartTime: TimeInterval?
 
     private(set) var currentFrameRate: Int
     private(set) var estimatedFrameRate: Int?
@@ -27,12 +29,14 @@ struct FrameRateEstimator {
         windowDuration: TimeInterval = 2.5,
         stabilityDuration: TimeInterval = 2.0,
         cooldownDuration: TimeInterval = 5.0,
+        probeInterval: TimeInterval = 10.0,
         minimumChangedAreaRatio: Double = 0.001
     ) {
         self.currentFrameRate = Self.quantizedFrameRate(for: Double(initialFrameRate))
         self.windowDuration = windowDuration
         self.stabilityDuration = stabilityDuration
         self.cooldownDuration = cooldownDuration
+        self.probeInterval = probeInterval
         self.minimumChangedAreaRatio = minimumChangedAreaRatio
     }
 
@@ -41,6 +45,7 @@ struct FrameRateEstimator {
         candidateFrameRate = nil
         candidateStartTime = nil
         lastRecommendationTime = nil
+        samplingStartTime = nil
         estimatedFrameRate = nil
         currentFrameRate = Self.quantizedFrameRate(for: Double(initialFrameRate))
     }
@@ -56,6 +61,18 @@ struct FrameRateEstimator {
 
         if let last = changedFrameTimestamps.last, timestamp <= last {
             return nil
+        }
+
+        if samplingStartTime == nil { samplingStartTime = timestamp }
+
+        // A capped capture stream cannot reveal an increase in the source rate.
+        // Periodically probe at the ceiling, but only while content is changing.
+        if currentFrameRate < CaptureSettings.autoFrameRateSamplingCeiling,
+           let probeStart = lastRecommendationTime ?? samplingStartTime,
+           timestamp - probeStart >= probeInterval {
+            reset(initialFrameRate: CaptureSettings.autoFrameRateSamplingCeiling)
+            self.lastRecommendationTime = timestamp
+            return currentFrameRate
         }
 
         changedFrameTimestamps.append(timestamp)
