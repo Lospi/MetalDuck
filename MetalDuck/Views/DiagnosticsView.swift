@@ -60,7 +60,7 @@ struct DiagnosticsView: View {
             VStack(spacing: 6) {
                 Text("Device Capability Test")
                     .font(.title3.bold())
-                Text("Tests which processing resolutions your device supports for\nFrame Interpolation and Super Resolution.")
+                Text("Tests which processing resolutions your device supports for\nFrame Interpolation, 2x Upscale, and Super Resolution.")
                     .multilineTextAlignment(.center)
                     .foregroundColor(.secondary)
                     .font(.callout)
@@ -90,6 +90,9 @@ struct DiagnosticsView: View {
 
             resultsTable
                 .padding(.horizontal, 20)
+
+            spatialResultsTable
+                .padding(.horizontal, 20)
                 .padding(.bottom, 20)
         }
     }
@@ -101,6 +104,12 @@ struct DiagnosticsView: View {
             resultsTable
                 .padding(.horizontal, 20)
                 .padding(.top, 16)
+
+            Divider()
+                .padding(.horizontal, 20)
+
+            spatialResultsTable
+                .padding(.horizontal, 20)
 
             Divider()
                 .padding(.horizontal, 20)
@@ -168,6 +177,45 @@ struct DiagnosticsView: View {
             .foregroundColor(color)
             .frame(width: 80, alignment: .trailing)
             .padding(.horizontal, 10)
+    }
+
+    // MARK: - Frame Interpolation + Upscale Results
+
+    private var spatialResultsTable: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Label("Frame Interpolation + 2x Upscale", systemImage: "arrow.up.left.and.arrow.down.right")
+                .font(.subheadline.bold())
+
+            if !runner.frameInterpIsSupported {
+                unsupportedBadge("Not supported on this hardware")
+            } else {
+                VStack(spacing: 0) {
+                    tableHeader(["Resolution", "Input", "Output", "Status", "Load Time"])
+                    ForEach(runner.spatialFrameInterpolationResults) { result in
+                        Divider()
+                        spatialResultRow(result)
+                    }
+                }
+                .background(Color(.textBackgroundColor).opacity(0.4))
+                .cornerRadius(8)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 8)
+                        .stroke(Color.primary.opacity(0.1), lineWidth: 1)
+                )
+            }
+        }
+    }
+
+    private func spatialResultRow(_ result: DiagnosticsRunner.FrameInterpolationResult) -> some View {
+        let dims = result.resolution.dimensions
+        return HStack(spacing: 0) {
+            cell(result.resolution.rawValue, width: 70, alignment: .leading)
+            cell("\(dims.width)×\(dims.height)", width: 90, alignment: .leading)
+            cell("\(dims.width * 2)×\(dims.height * 2)", width: 110, alignment: .leading)
+            statusCell(result.status)
+            loadTimeCell(result.status)
+        }
+        .frame(height: 30)
     }
 
     // MARK: - Super Resolution Results

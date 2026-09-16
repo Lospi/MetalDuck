@@ -86,6 +86,9 @@ struct UpscaleSettings: Codable {
     
     /// Calculates the target frame rate based on source frame rate and multiplier
     func targetFrameRate(sourceFrameRate: Int) -> Int {
+        if spatialUpscaleEnabled {
+            return sourceFrameRate * 2
+        }
         return sourceFrameRate * interpolationMultiplier
     }
     
@@ -95,4 +98,3 @@ struct UpscaleSettings: Codable {
         return min(widthScale, heightScale)
     }
 }
-
