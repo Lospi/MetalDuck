@@ -42,6 +42,8 @@ class AppCoordinator {
     private var activeProcessingResolution: ProcessingResolution?
     private var activeSpatialUpscaleEnabled: Bool?
     private var interpolationUnsupported = false
+    private var effectiveCaptureFrameRate = 60
+    private var frameRateEstimator = FrameRateEstimator(initialFrameRate: 60)
 
     init() {
         setupComponents()
@@ -97,8 +99,9 @@ class AppCoordinator {
         if #available(macOS 12.3, *) {
             // Match capture resolution to window size before starting capture
             await matchCaptureResolutionToWindow()
+            prepareCaptureFrameRateForStart()
 
-            captureManager = ScreenCaptureManager(settings: captureSettings)
+            captureManager = ScreenCaptureManager(settings: activeCaptureSettings)
 
             do {
                 let stream = try await captureManager!.startCapture()
@@ -156,11 +159,13 @@ class AppCoordinator {
         lastFrameTimestamp = nil
         didApplyContentWidthRatio = false
         resetRuntimeFallbacks()
+        resetAutoFrameRateEstimator()
     }
 
     private func processFrame(_ frame: CapturedFrame) async {
         guard let overlay = overlayManager else { return }
         sourceFrameCount += 1
+        await updateAutoFrameRateIfNeeded(for: frame)
 
         let currentPTS = frame.presentationTimestamp
         let prevPTS = lastFrameTimestamp ?? currentPTS
@@ -295,6 +300,9 @@ class AppCoordinator {
             overlayManager?.updateDebugInfo(
                 fps: fps,
                 sourceFPS: currentSourceFPS,
+                effectiveCaptureFPS: effectiveCaptureFrameRate,
+                autoCaptureFPS: captureSettings.autoFrameRateEnabled,
+                estimatedGameFPS: frameRateEstimator.estimatedFrameRate,
                 status: appState.processingStatus,
                 captureRes: captureSettings.captureResolution,
                 processingRes: processingRes,
@@ -363,12 +371,21 @@ class AppCoordinator {
         videoToolboxUpscaler?.updateSettings(newSettings)
     }
 
+    func updateCaptureSettings(_ newSettings: CaptureSettings) {
+        let autoFrameRateChanged = captureSettings.autoFrameRateEnabled != newSettings.autoFrameRateEnabled
+        captureSettings = newSettings
+
+        if autoFrameRateChanged {
+            resetAutoFrameRateEstimator()
+        }
+    }
+
     // MARK: - Picker
 
     @available(macOS 12.3, *)
     func presentPicker() {
         if captureManager == nil {
-            captureManager = ScreenCaptureManager(settings: captureSettings)
+            captureManager = ScreenCaptureManager(settings: activeCaptureSettings)
             captureManager?.onPickerFilterSelected = { [weak self] filter in
                 Task { @MainActor in
                     await self?.startCaptureWithFilter(filter)
@@ -386,6 +403,8 @@ class AppCoordinator {
         guard let overlay = overlayManager else { return }
 
         do {
+            prepareCaptureFrameRateForStart()
+            captureManager = ScreenCaptureManager(settings: activeCaptureSettings)
             let stream = try await captureManager!.startCapture()
             // Apply the picked filter to the new session
             await captureManager?.applyPickerFilter(filter)
@@ -412,6 +431,49 @@ class AppCoordinator {
             }
         } catch {
             appState.setError("Failed to start capture: \(error.localizedDescription)")
+        }
+    }
+
+    private var activeCaptureSettings: CaptureSettings {
+        var settings = captureSettings
+        settings.frameRate = effectiveCaptureFrameRate
+        return settings
+    }
+
+    private func prepareCaptureFrameRateForStart() {
+        effectiveCaptureFrameRate = captureSettings.initialCaptureFrameRate
+        resetAutoFrameRateEstimator()
+        videoToolboxUpscaler?.updateSourceFrameRate(effectiveCaptureFrameRate)
+    }
+
+    private func resetAutoFrameRateEstimator() {
+        frameRateEstimator.reset(initialFrameRate: effectiveCaptureFrameRate)
+    }
+
+    private func updateAutoFrameRateIfNeeded(for frame: CapturedFrame) async {
+        guard captureSettings.autoFrameRateEnabled else { return }
+
+        guard let recommendedFrameRate = frameRateEstimator.observe(
+            timestamp: frame.frameRateTimestamp,
+            changedAreaRatio: frame.changedAreaRatio
+        ) else {
+            return
+        }
+
+        guard recommendedFrameRate != effectiveCaptureFrameRate else { return }
+
+        do {
+            guard let captureManager else { return }
+            try await captureManager.updateFrameRate(recommendedFrameRate)
+            guard !Task.isCancelled, appState.isCapturing else { return }
+            effectiveCaptureFrameRate = recommendedFrameRate
+            videoToolboxUpscaler?.updateSourceFrameRate(recommendedFrameRate)
+            appState.processingStatus = "Auto capture FPS: \(recommendedFrameRate)"
+            print("   🎚️ Auto capture FPS adjusted to \(recommendedFrameRate)")
+        } catch {
+            resetAutoFrameRateEstimator()
+            appState.processingStatus = "Auto capture FPS update failed"
+            print("   ⚠️ Auto capture FPS update failed: \(error.localizedDescription)")
         }
     }
 }

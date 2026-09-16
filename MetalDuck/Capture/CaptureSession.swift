@@ -13,6 +13,7 @@ import CoreMedia
 @available(macOS 12.3, *)
 class CaptureSession {
     private var stream: SCStream?
+    private var streamConfig: SCStreamConfiguration?
     private var streamOutput: StreamOutput?
     private let settings: CaptureSettings
 
@@ -36,10 +37,11 @@ class CaptureSession {
 
         streamConfig.width = Int(settings.captureResolution.width)
         streamConfig.height = Int(settings.captureResolution.height)
-        streamConfig.minimumFrameInterval = CMTime(value: 1, timescale: CMTimeScale(settings.frameRate))
+        streamConfig.minimumFrameInterval = CaptureSettings.frameInterval(for: settings.frameRate)
         streamConfig.queueDepth = 5
         streamConfig.showsCursor = false
         streamConfig.capturesAudio = false
+        self.streamConfig = streamConfig
 
         let (frameStream, continuation) = AsyncThrowingStream.makeStream(of: CapturedFrame.self)
         self.continuation = continuation
@@ -59,6 +61,13 @@ class CaptureSession {
         return frameStream
     }
 
+    func updateFrameRate(_ frameRate: Int) async throws {
+        guard let stream, let streamConfig else { return }
+
+        streamConfig.minimumFrameInterval = CaptureSettings.frameInterval(for: frameRate)
+        try await stream.updateConfiguration(streamConfig)
+    }
+
     func updateContentFilter(_ filter: SCContentFilter) async {
         do {
             try await stream?.updateContentFilter(filter)
@@ -76,6 +85,7 @@ class CaptureSession {
         continuation?.finish()
         continuation = nil
         stream = nil
+        streamConfig = nil
         streamOutput = nil
     }
 
