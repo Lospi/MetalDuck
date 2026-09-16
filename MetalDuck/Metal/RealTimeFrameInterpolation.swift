@@ -86,6 +86,11 @@ actor RealTimeFrameInterpolation {
             throw Fault.unsupportedProcessor
         }
 
+        let capability = VideoProcessingCapabilities.interpolation(spatialScaleFactor: spatialScaleFactor)
+        guard capability.allows(width: width, height: height) != false else {
+            throw Fault.rejectedByCapabilities
+        }
+
         let configuration: VTLowLatencyFrameInterpolationConfiguration?
         if spatialUpscale {
             // Separate init for spatial+temporal: gives 1 interpolated frame + 2x upscale
@@ -383,6 +388,7 @@ actor RealTimeFrameInterpolation {
 
 @available(macOS 14.0, *)
 enum Fault: Error {
+    case rejectedByCapabilities
     case unsupportedProcessor
     case failedToCreateConfiguration
     case sessionNotStarted
