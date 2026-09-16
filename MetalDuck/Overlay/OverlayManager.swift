@@ -23,7 +23,8 @@ class OverlayManager {
     // AVSampleBufferDisplayLayer for vsync'd, timed frame presentation
     private var sampleBufferLayer: AVSampleBufferDisplayLayer?
     private var sampleBufferRenderer: AVSampleBufferVideoRenderer?
-    private let enqueueQueue = DispatchQueue(label: "com.metalduck.enqueue")
+    private var receiverPresenter: AnyObject?
+    private var presentationError: String?
 
     // Debug HUD
     private var debugTextField: NSTextField?
@@ -115,17 +116,24 @@ class OverlayManager {
         layer.videoGravity = .resize
         layer.frame = view.bounds
 
-        // Create a timebase synced to the host clock at real-time rate
-        var timebase: CMTimebase?
-        CMTimebaseCreateWithSourceClock(
-            allocator: kCFAllocatorDefault,
-            sourceClock: CMClockGetHostTimeClock(),
-            timebaseOut: &timebase
-        )
-        if let timebase {
-            layer.controlTimebase = timebase
-            CMTimebaseSetTime(timebase, time: .zero)
-            CMTimebaseSetRate(timebase, rate: 1.0)
+        if #available(macOS 27.0, *) {
+            receiverPresenter = ReceiverFramePresenter(renderer: layer.sampleBufferRenderer) { [weak self] message in
+                self?.presentationError = "Display failed: \(message). Restart capture."
+                print("Video receiver failed: \(message)")
+            }
+        } else {
+            // Create a timebase synced to the host clock at real-time rate
+            var timebase: CMTimebase?
+            CMTimebaseCreateWithSourceClock(
+                allocator: kCFAllocatorDefault,
+                sourceClock: CMClockGetHostTimeClock(),
+                timebaseOut: &timebase
+            )
+            if let timebase {
+                layer.controlTimebase = timebase
+                CMTimebaseSetTime(timebase, time: .zero)
+                CMTimebaseSetRate(timebase, rate: 1.0)
+            }
         }
 
         view.layer?.addSublayer(layer)
@@ -168,6 +176,9 @@ class OverlayManager {
 
     /// Current time on the display layer's timebase.
     private var currentTimebaseTime: CMTime {
+        if #available(macOS 27.0, *), let presenter = receiverPresenter as? ReceiverFramePresenter {
+            return presenter.currentTime
+        }
         guard let timebase = sampleBufferLayer?.controlTimebase else {
             return CMTime(seconds: CACurrentMediaTime(), preferredTimescale: 600)
         }
@@ -181,7 +192,9 @@ class OverlayManager {
         let pts = CMTimeAdd(currentTimebaseTime, CMTime(seconds: offsetFromNow, preferredTimescale: 600))
         guard let sampleBuffer = Self.createSampleBuffer(from: pixelBuffer, timestamp: pts) else { return }
 
-        if renderer.isReadyForMoreMediaData {
+        if #available(macOS 27.0, *), let presenter = receiverPresenter as? ReceiverFramePresenter {
+            presenter.enqueue(sampleBuffer)
+        } else if renderer.isReadyForMoreMediaData {
             renderer.enqueue(sampleBuffer)
         }
     }
@@ -189,12 +202,18 @@ class OverlayManager {
     /// Flush pending frames and enqueue immediately (for passthrough / non-timed display).
     func displayBufferImmediate(_ pixelBuffer: CVPixelBuffer) {
         guard let renderer = sampleBufferRenderer else { return }
-        renderer.flush()
+        if #available(macOS 27.0, *), let presenter = receiverPresenter as? ReceiverFramePresenter {
+            presenter.flush()
+        } else {
+            renderer.flush()
+        }
 
         let pts = currentTimebaseTime
         guard let sampleBuffer = Self.createSampleBuffer(from: pixelBuffer, timestamp: pts) else { return }
 
-        if renderer.isReadyForMoreMediaData {
+        if #available(macOS 27.0, *), let presenter = receiverPresenter as? ReceiverFramePresenter {
+            presenter.enqueue(sampleBuffer)
+        } else if renderer.isReadyForMoreMediaData {
             renderer.enqueue(sampleBuffer)
         }
     }
@@ -225,7 +244,7 @@ class OverlayManager {
         var lines = [
             captureLine,
             String(format: " Delivered: %.0f → Display: %.0f FPS ", sourceFPS, fps),
-            " \(status) ",
+            " \(presentationError ?? status) ",
             " Capture: \(Int(captureRes.width))x\(Int(captureRes.height)) ",
         ]
         if let proc = processingRes {
@@ -235,7 +254,7 @@ class OverlayManager {
         debugTextField.stringValue = lines.joined(separator: "\n")
 
         // Red text when resolution is unsupported
-        let isError = status.contains("unsupported")
+        let isError = presentationError != nil || status.contains("unsupported")
         debugTextField.textColor = isError ? .systemRed : .white
     }
 
@@ -265,7 +284,13 @@ class OverlayManager {
 
     func close() {
         stopTrackingWindow()
-        sampleBufferRenderer?.flush()
+        if #available(macOS 27.0, *), let presenter = receiverPresenter as? ReceiverFramePresenter {
+            presenter.stop()
+        } else {
+            sampleBufferRenderer?.flush()
+        }
+        receiverPresenter = nil
+        presentationError = nil
         sampleBufferLayer?.removeFromSuperlayer()
         sampleBufferLayer = nil
         sampleBufferRenderer = nil
