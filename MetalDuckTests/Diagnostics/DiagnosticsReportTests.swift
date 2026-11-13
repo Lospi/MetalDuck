@@ -31,4 +31,19 @@ struct DiagnosticsReportTests {
         let report = runner.generateReport()
         #expect(report.contains("Per-scale limits unavailable on this OS; using runtime checks."))
     }
+
+    @Test("Screen recording availability is reported only when the OS can answer", arguments: [
+        (Bool?.some(false), "- **Screen recording available:** No", true),
+        (Bool?.some(true), "- **Screen recording available:** Yes", true),
+        (Bool?.none, "Screen recording available", false)
+    ])
+    @MainActor func reportsScreenRecordingAvailability(available: Bool?, line: String, isPresent: Bool) {
+        let runner = DiagnosticsRunner()
+        runner.deviceInfo = .init(
+            chip: "Test", physicalCPUs: 8, performanceCores: 6, efficiencyCores: 2,
+            gpuCores: 14, memoryGB: 16, macOSVersion: "Test",
+            screenRecordingAvailable: available
+        )
+        #expect(runner.generateReport().contains(line) == isPresent)
+    }
 }
