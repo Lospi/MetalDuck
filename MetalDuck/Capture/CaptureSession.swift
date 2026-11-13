@@ -22,8 +22,14 @@ class CaptureSession {
         self.settings = settings
     }
 
-    func startCapture() async throws -> AsyncThrowingStream<CapturedFrame, Error> {
-        guard let contentFilter = await settings.contentFilter() else {
+    func startCapture(filter: SCContentFilter? = nil) async throws -> AsyncThrowingStream<CapturedFrame, Error> {
+        let pickedOrConfigured: SCContentFilter?
+        if let filter {
+            pickedOrConfigured = filter
+        } else {
+            pickedOrConfigured = await settings.contentFilter()
+        }
+        guard let contentFilter = pickedOrConfigured else {
             throw CaptureError.invalidContentFilter
         }
 

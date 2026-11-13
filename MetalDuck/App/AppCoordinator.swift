@@ -17,12 +17,23 @@ class AppCoordinator {
     static let shared = AppCoordinator()
 
     var appState = AppState()
-    var captureSettings = CaptureSettings()
+    var captureSettings = CaptureSettings() {
+        didSet {
+            // Choosing a target in Preferences replaces whatever was picked in the system picker.
+            if captureSettings.targetWindowID != oldValue.targetWindowID
+                || captureSettings.targetDisplayID != oldValue.targetDisplayID {
+                pickedFilter = nil
+            }
+        }
+    }
     var upscaleSettings = UpscaleSettings()
 
     private var videoToolboxUpscaler: VideoToolboxUpscaler?
     private(set) var overlayManager: OverlayManager?
     private var captureManager: ScreenCaptureManager?
+    private var contentPicker: ContentPickerController?
+    /// Content chosen in the system picker. Used for every start until the Preferences target changes.
+    private var pickedFilter: SCContentFilter?
     private var menuBarController: MenuBarController?
     private var captureTask: Task<Void, Never>?
     private let updaterDelegate = UpdaterDelegate()
@@ -90,6 +101,15 @@ class AppCoordinator {
             }
         }
 
+        ensureContentPicker()
+
+        await beginCapture(filter: pickedFilter)
+    }
+
+    /// Starts capturing `filter`, or the Preferences target when `filter` is nil.
+    private func beginCapture(filter: SCContentFilter?) async {
+        guard !appState.isCapturing else { return }
+
         guard let overlay = overlayManager else {
             appState.setError("Overlay not initialized")
             return
@@ -99,16 +119,17 @@ class AppCoordinator {
         await matchCaptureResolutionToWindow()
         prepareCaptureFrameRateForStart()
 
-        captureManager = ScreenCaptureManager(settings: activeCaptureSettings)
+        let manager = ScreenCaptureManager(settings: activeCaptureSettings)
+        captureManager = manager
 
         do {
-            let stream = try await captureManager!.startCapture()
+            let stream = try await manager.startCapture(filter: filter)
             appState.startCapture()
 
             interpolator = nil
             resetRuntimeFallbacks()
 
-            createDisplayForCapture(overlay: overlay)
+            createDisplayForCapture(overlay: overlay, usesPickedContent: filter != nil)
 
             captureTask = Task { [weak self] in
                 do {
@@ -123,6 +144,8 @@ class AppCoordinator {
                 }
             }
         } catch {
+            // The picked content may no longer exist; ask again on the next start.
+            if filter != nil { pickedFilter = nil }
             appState.setError("Failed to start capture: \(error.localizedDescription)")
         }
     }
@@ -304,8 +327,9 @@ class AppCoordinator {
     }
 
     /// Creates the appropriate display: overlay on target window, or standalone window.
-    private func createDisplayForCapture(overlay: OverlayManager) {
-        if let windowID = captureSettings.targetWindowID {
+    private func createDisplayForCapture(overlay: OverlayManager, usesPickedContent: Bool) {
+        // Picked content has no window ID to track, so it always gets the standalone window.
+        if !usesPickedContent, let windowID = captureSettings.targetWindowID {
             overlay.createOverlayOnWindow(windowID: windowID)
             overlay.show()
             print("   🎯 Overlay mode: tracking window \(windowID)")
@@ -370,50 +394,30 @@ class AppCoordinator {
     // MARK: - Picker
 
     func presentPicker() {
-        if captureManager == nil {
-            captureManager = ScreenCaptureManager(settings: activeCaptureSettings)
-            captureManager?.onPickerFilterSelected = { [weak self] filter in
-                Task { @MainActor in
-                    await self?.startCaptureWithFilter(filter)
-                }
-            }
-        }
-        captureManager?.presentPicker()
+        ensureContentPicker()
+        contentPicker?.present()
     }
 
-    private func startCaptureWithFilter(_ filter: SCContentFilter) async {
-        // If already capturing, the filter was applied to the running session
-        guard !appState.isCapturing else { return }
-
-        guard let overlay = overlayManager else { return }
-
-        do {
-            prepareCaptureFrameRateForStart()
-            captureManager = ScreenCaptureManager(settings: activeCaptureSettings)
-            let stream = try await captureManager!.startCapture()
-            // Apply the picked filter to the new session
-            await captureManager?.applyPickerFilter(filter)
-            appState.startCapture()
-
-            interpolator = nil
-            resetRuntimeFallbacks()
-
-            createDisplayForCapture(overlay: overlay)
-
-            captureTask = Task { [weak self] in
-                do {
-                    for try await frame in stream {
-                        await self?.processFrame(frame)
-                    }
-                } catch {
-                    await MainActor.run {
-                        self?.appState.setError("Capture stream error: \(error.localizedDescription)")
-                    }
-                    await self?.stopCapture()
-                }
+    private func ensureContentPicker() {
+        guard contentPicker == nil else { return }
+        let picker = ContentPickerController()
+        picker.onFilterSelected = { [weak self] filter in
+            Task { @MainActor in
+                await self?.handlePickedFilter(filter)
             }
-        } catch {
-            appState.setError("Failed to start capture: \(error.localizedDescription)")
+        }
+        picker.onStartFailed = { [weak self] message in
+            self?.appState.setError("Content picker failed: \(message)")
+        }
+        contentPicker = picker
+    }
+
+    private func handlePickedFilter(_ filter: SCContentFilter) async {
+        pickedFilter = filter
+        if appState.isCapturing {
+            await captureManager?.updateContentFilter(filter)
+        } else {
+            await beginCapture(filter: filter)
         }
     }
 
