@@ -10,7 +10,6 @@ import ScreenCaptureKit
 import CoreVideo
 import CoreMedia
 
-@available(macOS 12.3, *)
 class CaptureSession {
     private var stream: SCStream?
     private var streamConfig: SCStreamConfiguration?
@@ -23,13 +22,19 @@ class CaptureSession {
         self.settings = settings
     }
 
-    func startCapture() async throws -> AsyncThrowingStream<CapturedFrame, Error> {
-        guard let contentFilter = await settings.contentFilter() else {
+    func startCapture(filter: SCContentFilter? = nil) async throws -> AsyncThrowingStream<CapturedFrame, Error> {
+        let pickedOrConfigured: SCContentFilter?
+        if let filter {
+            pickedOrConfigured = filter
+        } else {
+            pickedOrConfigured = await settings.contentFilter()
+        }
+        guard let contentFilter = pickedOrConfigured else {
             throw CaptureError.invalidContentFilter
         }
 
         let streamConfig: SCStreamConfiguration
-        if #available(macOS 15.0, *), let preset = settings.selectedDynamicRangePreset?.scDynamicRangePreset {
+        if let preset = settings.selectedDynamicRangePreset?.scDynamicRangePreset {
             streamConfig = SCStreamConfiguration(preset: preset)
         } else {
             streamConfig = SCStreamConfiguration()
@@ -95,7 +100,6 @@ class CaptureSession {
     }
 }
 
-@available(macOS 12.3, *)
 private class StreamOutput: NSObject, SCStreamOutput {
     private let continuation: AsyncThrowingStream<CapturedFrame, Error>.Continuation
 

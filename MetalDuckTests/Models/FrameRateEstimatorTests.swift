@@ -8,6 +8,7 @@
 import Testing
 @testable import MetalDuck
 
+@MainActor
 struct FrameRateEstimatorTests {
 
     @Test(

@@ -12,7 +12,7 @@ import Darwin
 import IOSurface
 import ScreenCaptureKit
 
-struct CapturedFrame: @unchecked Sendable {
+nonisolated struct CapturedFrame: @unchecked Sendable {
     let surface: IOSurface
     let pixelBuffer: CVPixelBuffer
     let presentationTimestamp: CMTime
@@ -25,7 +25,6 @@ struct CapturedFrame: @unchecked Sendable {
     var size: CGSize { contentRect.size }
 }
 
-@available(macOS 12.3, *)
 extension CapturedFrame {
     /// Creates a CapturedFrame from a CMSampleBuffer produced by SCStream.
     /// Returns nil if the frame status is not `.complete` or required data is missing.

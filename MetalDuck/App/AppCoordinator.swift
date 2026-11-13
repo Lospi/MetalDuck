@@ -17,18 +17,28 @@ class AppCoordinator {
     static let shared = AppCoordinator()
 
     var appState = AppState()
-    var captureSettings = CaptureSettings()
+    var captureSettings = CaptureSettings() {
+        didSet {
+            // Choosing a target in Preferences replaces whatever was picked in the system picker.
+            if captureSettings.targetWindowID != oldValue.targetWindowID
+                || captureSettings.targetDisplayID != oldValue.targetDisplayID {
+                pickedFilter = nil
+            }
+        }
+    }
     var upscaleSettings = UpscaleSettings()
 
     private var videoToolboxUpscaler: VideoToolboxUpscaler?
     private(set) var overlayManager: OverlayManager?
     private var captureManager: ScreenCaptureManager?
+    private var contentPicker: ContentPickerController?
+    /// Content chosen in the system picker. Used for every start until the Preferences target changes.
+    private var pickedFilter: SCContentFilter?
     private var menuBarController: MenuBarController?
     private var captureTask: Task<Void, Never>?
     private let updaterDelegate = UpdaterDelegate()
     private var updaterController: SPUStandardUpdaterController?
 
-    @available(macOS 14.0, *)
     private var interpolator: RealTimeFrameInterpolation?
 
     private var frameCount = 0
@@ -42,6 +52,9 @@ class AppCoordinator {
     private var activeProcessingResolution: ProcessingResolution?
     private var activeSpatialUpscaleEnabled: Bool?
     private var interpolationUnsupported = false
+    private var throughputMonitor = InterpolationThroughputMonitor()
+    /// Set when this session lowered the resolution because interpolation was too slow.
+    private var throughputStepDownNote: String?
     private var effectiveCaptureFrameRate = 60
     private var frameRateEstimator = FrameRateEstimator(initialFrameRate: 60)
 
@@ -81,7 +94,7 @@ class AppCoordinator {
     }
 
     func startCapture() async {
-        guard !appState.isCapturing else { return }
+        guard !appState.isCapturing, !appState.isStarting else { return }
 
         if !PermissionManager.shared.hasScreenRecordingPermission {
             let granted = await PermissionManager.shared.requestScreenRecordingPermission()
@@ -91,46 +104,63 @@ class AppCoordinator {
             }
         }
 
+        ensureContentPicker()
+
+        if let pickedFilter {
+            await beginCapture(filter: pickedFilter)
+        } else if captureSettings.hasTarget {
+            await beginCapture(filter: nil)
+        } else {
+            // Nothing has been chosen yet: ask, and start once the user picks.
+            presentPicker()
+        }
+    }
+
+    /// Starts capturing `filter`, or the Preferences target when `filter` is nil.
+    private func beginCapture(filter: SCContentFilter?) async {
+        // Starting the stream suspends, so a second request could otherwise slip in before
+        // `isCapturing` is set and start a second, orphaned stream.
+        guard appState.beginStarting() else { return }
+
         guard let overlay = overlayManager else {
+            appState.cancelStarting()
             appState.setError("Overlay not initialized")
             return
         }
 
-        if #available(macOS 12.3, *) {
-            // Match capture resolution to window size before starting capture
-            await matchCaptureResolutionToWindow()
-            prepareCaptureFrameRateForStart()
+        // Match capture resolution to window size before starting capture
+        await matchCaptureResolutionToWindow()
+        prepareCaptureFrameRateForStart()
 
-            captureManager = ScreenCaptureManager(settings: activeCaptureSettings)
+        let manager = ScreenCaptureManager(settings: activeCaptureSettings)
+        captureManager = manager
 
-            do {
-                let stream = try await captureManager!.startCapture()
-                appState.startCapture()
+        do {
+            let stream = try await manager.startCapture(filter: filter)
+            appState.startCapture()
 
-                if #available(macOS 14.0, *) {
-                    interpolator = nil
-                }
-                resetRuntimeFallbacks()
+            interpolator = nil
+            resetRuntimeFallbacks()
 
-                createDisplayForCapture(overlay: overlay)
+            createDisplayForCapture(overlay: overlay, usesPickedContent: filter != nil)
 
-                captureTask = Task { [weak self] in
-                    do {
-                        for try await frame in stream {
-                            await self?.processFrame(frame)
-                        }
-                    } catch {
-                        await MainActor.run {
-                            self?.appState.setError("Capture stream error: \(error.localizedDescription)")
-                        }
-                        await self?.stopCapture()
+            captureTask = Task { [weak self] in
+                do {
+                    for try await frame in stream {
+                        await self?.processFrame(frame)
                     }
+                } catch {
+                    await MainActor.run {
+                        self?.appState.setError("Capture stream error: \(error.localizedDescription)")
+                    }
+                    await self?.stopCapture()
                 }
-            } catch {
-                appState.setError("Failed to start capture: \(error.localizedDescription)")
             }
-        } else {
-            appState.setError("ScreenCaptureKit requires macOS 12.3 or later")
+        } catch {
+            appState.cancelStarting()
+            // The picked content may no longer exist; ask again on the next start.
+            if filter != nil { pickedFilter = nil }
+            appState.setError("Failed to start capture: \(error.localizedDescription)")
         }
     }
 
@@ -144,16 +174,12 @@ class AppCoordinator {
         captureTask = nil
         task?.cancel()
 
-        if #available(macOS 12.3, *) {
-            await captureManager?.stopCapture()
-            captureManager = nil
-        }
+        await captureManager?.stopCapture()
+        captureManager = nil
 
         // Stop the interpolator's VTFrameProcessor session
-        if #available(macOS 14.0, *) {
-            await interpolator?.stop()
-            interpolator = nil
-        }
+        await interpolator?.stop()
+        interpolator = nil
 
         overlayManager?.close()
         lastFrameTimestamp = nil
@@ -186,9 +212,7 @@ class AppCoordinator {
 
 
         // If interpolation is enabled, run through interpolator
-        if #available(macOS 14.0, *),
-           upscaleSettings.mode == .frameInterpolation || upscaleSettings.frameInterpolationEnabled
-        {
+        if upscaleSettings.mode == .frameInterpolation || upscaleSettings.frameInterpolationEnabled {
             if interpolationUnsupported {
                 appState.processingStatus = "Interpolation unsupported on this device"
                 overlay.displayBufferImmediate(frame.pixelBuffer)
@@ -213,11 +237,14 @@ class AppCoordinator {
                         spatialUpscale: spatialUpscaleEnabled
                     )
                     try await interpolator?.start()
+                    throughputMonitor.reset()
                 }
+                let processingStart = ContinuousClock.now
                 if let outputs = try await interpolator?.process(
                     currentBuffer: frame.pixelBuffer,
                     currentTimestamp: currentPTS
-                ) {
+                ).map(\.buffer) {
+                    let processingTime = ContinuousClock.now - processingStart
                     let isModelReady = await interpolator?.modelReady ?? false
 
                     if isModelReady {
@@ -232,9 +259,10 @@ class AppCoordinator {
                         }
                         let outputFrameCount = max(1, outputs.count)
                         let totalPerInput = spatialUpscaleEnabled ? outputFrameCount : outputFrameCount + 1
-                        appState.processingStatus = spatialUpscaleEnabled
+                        appState.processingStatus = (spatialUpscaleEnabled
                             ? "Interpolating + 2x Upscale (\(totalPerInput) frames/input)"
-                            : "Interpolating (\(totalPerInput) frames/input)"
+                            : "Interpolating (\(totalPerInput) frames/input)")
+                            + (throughputStepDownNote.map { " · \($0)" } ?? "")
 
                         // Calculate evenly spaced offsets for smooth frame pacing
                         let frameDuration = CMTimeGetSeconds(currentPTS) - CMTimeGetSeconds(prevPTS)
@@ -249,6 +277,8 @@ class AppCoordinator {
                             overlay.enqueueBuffer(frame.pixelBuffer, offsetFromNow: step * Double(outputs.count))
                             updateFPS()
                         }
+
+                        await stepDownIfTooSlow(processingTime: processingTime, from: processingResolution)
                     } else if await interpolator?.modelFailed ?? false {
                         await advanceInterpolationFallback()
                         overlay.displayBufferImmediate(frame.pixelBuffer)
@@ -293,7 +323,7 @@ class AppCoordinator {
             lastFPSTime = now
 
             var processingRes: CGSize? = nil
-            if #available(macOS 14.0, *), let interp = interpolator {
+            if let interp = interpolator {
                 let outDims = interp.outputDimensions
                 processingRes = CGSize(width: CGFloat(outDims.width), height: CGFloat(outDims.height))
             }
@@ -317,8 +347,9 @@ class AppCoordinator {
     }
 
     /// Creates the appropriate display: overlay on target window, or standalone window.
-    private func createDisplayForCapture(overlay: OverlayManager) {
-        if let windowID = captureSettings.targetWindowID {
+    private func createDisplayForCapture(overlay: OverlayManager, usesPickedContent: Bool) {
+        // Picked content has no window ID to track, so it always gets the standalone window.
+        if !usesPickedContent, let windowID = captureSettings.targetWindowID {
             overlay.createOverlayOnWindow(windowID: windowID)
             overlay.show()
             print("   🎯 Overlay mode: tracking window \(windowID)")
@@ -355,7 +386,43 @@ class AppCoordinator {
         }
     }
 
+    /// Lowers the processing resolution for this session when interpolation cannot keep up with
+    /// the capture rate. The resolution chosen in Preferences is left untouched.
+    private func stepDownIfTooSlow(processingTime: Duration, from current: ProcessingResolution) async {
+        guard upscaleSettings.autoStepDownEnabled else { return }
+
+        // In auto capture mode the stream samples at a high ceiling, so judge against the detected
+        // game rate once there is one.
+        let targetFrameRate: Int
+        if captureSettings.autoFrameRateEnabled {
+            guard let estimated = frameRateEstimator.estimatedFrameRate else { return }
+            targetFrameRate = estimated
+        } else {
+            targetFrameRate = effectiveCaptureFrameRate
+        }
+
+        let seconds = Double(processingTime.components.seconds) + Double(processingTime.components.attoseconds) / 1e18
+        guard let median = throughputMonitor.observe(
+            processingTime: seconds,
+            frameInterval: 1.0 / Double(max(1, targetFrameRate))
+        ), let lower = current.lowerResolution else { return }
+
+        await interpolator?.stop()
+        interpolator = nil
+        guard !Task.isCancelled, appState.isCapturing else { return }
+
+        activeProcessingResolution = lower
+        passthroughFrameCount = 0
+        throughputStepDownNote = "\(current.rawValue) too slow, using \(lower.rawValue)"
+        print(String(
+            format: "   🔽 %@ takes %.0f ms per frame, too slow for %d FPS capture — stepping down to %@",
+            current.rawValue, median * 1000, targetFrameRate, lower.rawValue
+        ))
+    }
+
     private func resetRuntimeFallbacks() {
+        throughputMonitor.reset()
+        throughputStepDownNote = nil
         activeProcessingResolution = nil
         activeSpatialUpscaleEnabled = nil
         interpolationUnsupported = false
@@ -382,55 +449,31 @@ class AppCoordinator {
 
     // MARK: - Picker
 
-    @available(macOS 12.3, *)
     func presentPicker() {
-        if captureManager == nil {
-            captureManager = ScreenCaptureManager(settings: activeCaptureSettings)
-            captureManager?.onPickerFilterSelected = { [weak self] filter in
-                Task { @MainActor in
-                    await self?.startCaptureWithFilter(filter)
-                }
-            }
-        }
-        captureManager?.presentPicker()
+        ensureContentPicker()
+        contentPicker?.present()
     }
 
-    @available(macOS 12.3, *)
-    private func startCaptureWithFilter(_ filter: SCContentFilter) async {
-        // If already capturing, the filter was applied to the running session
-        guard !appState.isCapturing else { return }
-
-        guard let overlay = overlayManager else { return }
-
-        do {
-            prepareCaptureFrameRateForStart()
-            captureManager = ScreenCaptureManager(settings: activeCaptureSettings)
-            let stream = try await captureManager!.startCapture()
-            // Apply the picked filter to the new session
-            await captureManager?.applyPickerFilter(filter)
-            appState.startCapture()
-
-            if #available(macOS 14.0, *) {
-                interpolator = nil
+    private func ensureContentPicker() {
+        guard contentPicker == nil else { return }
+        let picker = ContentPickerController()
+        picker.onFilterSelected = { [weak self] filter in
+            Task { @MainActor in
+                await self?.handlePickedFilter(filter)
             }
-            resetRuntimeFallbacks()
+        }
+        picker.onStartFailed = { [weak self] message in
+            self?.appState.setError("Content picker failed: \(message)")
+        }
+        contentPicker = picker
+    }
 
-            createDisplayForCapture(overlay: overlay)
-
-            captureTask = Task { [weak self] in
-                do {
-                    for try await frame in stream {
-                        await self?.processFrame(frame)
-                    }
-                } catch {
-                    await MainActor.run {
-                        self?.appState.setError("Capture stream error: \(error.localizedDescription)")
-                    }
-                    await self?.stopCapture()
-                }
-            }
-        } catch {
-            appState.setError("Failed to start capture: \(error.localizedDescription)")
+    private func handlePickedFilter(_ filter: SCContentFilter) async {
+        pickedFilter = filter
+        if appState.isCapturing {
+            await captureManager?.updateContentFilter(filter)
+        } else {
+            await beginCapture(filter: filter)
         }
     }
 

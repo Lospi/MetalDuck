@@ -16,9 +16,9 @@ A macOS menu-bar app that captures any game window or display via **ScreenCaptur
 | Requirement | Minimum |
 |---|---|
 | macOS | 26.0 |
-| Xcode | 26.0 |
+| Xcode | 27.0 (builds against the macOS 27 SDK) |
 
-> Frame interpolation uses `VTLowLatencyFrameInterpolation`, available on Apple Silicon. On M1 Pro, only up to **720p** processing resolution is supported by the model; higher resolutions fall back automatically.
+> Frame interpolation uses `VTLowLatencyFrameInterpolation`, available on Apple Silicon. On macOS 27 the app asks the OS for its processing limits before starting the model; on macOS 26 it falls back to a lower resolution at runtime. On an M1 Pro, macOS 26 supported up to **720p**, while macOS 27.2 advertises and produced frames at **1080p** in a synthetic test (see `docs/validation/`).
 
 ## Build
 

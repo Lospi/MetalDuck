@@ -19,7 +19,6 @@ import AVFoundation
 /// a frame by this time, it's considered unsupported at this resolution.
 private nonisolated let kModelLoadTimeoutSeconds: Double = 5.0
 
-@available(macOS 14.0, *)
 actor RealTimeFrameInterpolation {
 
     // MARK: - Configuration
@@ -44,6 +43,9 @@ actor RealTimeFrameInterpolation {
     // MARK: - State
 
     private var sessionStarted = false
+    /// True while a frame is inside `frameProcessor.process`; see `stop()`.
+    private var isProcessing = false
+    private var stopPending = false
     private var previousFrame: (buffer: CVPixelBuffer, timestamp: CMTime)?
     private var transferSession: VTPixelTransferSession?
     private(set) var modelReady = false
@@ -137,8 +139,20 @@ actor RealTimeFrameInterpolation {
         sessionStarted = true
     }
 
+    /// Ends the session. If a frame is still inside VideoToolbox, the teardown is deferred until
+    /// `process` returns: the actor is re-entrant across `await`, and ending the session under an
+    /// in-flight frame crashes in VTFrameProcessor's output handler.
     func stop() {
         guard sessionStarted else { return }
+        guard !isProcessing else {
+            stopPending = true
+            return
+        }
+        endSession()
+    }
+
+    private func endSession() {
+        stopPending = false
         frameProcessor.endSession()
         sessionStarted = false
         previousFrame = nil
@@ -152,12 +166,18 @@ actor RealTimeFrameInterpolation {
 
     // MARK: - Processing
 
-    func process(currentBuffer: CVPixelBuffer, currentTimestamp: CMTime) async throws -> [CVPixelBuffer] {
-        guard sessionStarted else {
+    func process(currentBuffer: CVPixelBuffer, currentTimestamp: CMTime) async throws -> [SendablePixelBuffer] {
+        let passthrough = [SendablePixelBuffer(buffer: currentBuffer)]
+        guard sessionStarted, !stopPending, !isProcessing else {
             throw Fault.sessionNotStarted
         }
+        isProcessing = true
+        defer {
+            isProcessing = false
+            if stopPending { endSession() }
+        }
         guard !modelFailed else {
-            return [currentBuffer]
+            return passthrough
         }
 
         // Downscale + verify source buffer
@@ -166,7 +186,7 @@ actor RealTimeFrameInterpolation {
         // Need previous frame for interpolation
         guard let previous = previousFrame else {
             previousFrame = (buffer: compatibleBuffer, timestamp: currentTimestamp)
-            return [currentBuffer]
+            return passthrough
         }
 
         guard let sourceFrame = VTFrameProcessorFrame(buffer: previous.buffer, presentationTimeStamp: previous.timestamp),
@@ -193,29 +213,11 @@ actor RealTimeFrameInterpolation {
         previousFrame = (buffer: compatibleBuffer, timestamp: currentTimestamp)
 
         // Process — NO retries with startSession
-        var outputs: [CVPixelBuffer] = []
+        var outputs: [SendablePixelBuffer] = []
         do {
-            for try await readOnlyFrame in frameProcessor.process(parameters: parameters) {
-                let processedBuffer = try readOnlyFrame.frame.withUnsafeBuffer { readOnlyPixelBuffer -> CVPixelBuffer in
-                    let output = try Self.createPixelBuffer(from: pixelBufferPool)
-
-                    var copySession: VTPixelTransferSession?
-                    guard VTPixelTransferSessionCreate(allocator: kCFAllocatorDefault,
-                                                      pixelTransferSessionOut: &copySession) == noErr,
-                          let session = copySession
-                    else {
-                        throw Fault.failedToCreateOutputBuffer
-                    }
-
-                    let status = VTPixelTransferSessionTransferImage(session, from: readOnlyPixelBuffer, to: output)
-                    VTPixelTransferSessionInvalidate(session)
-                    guard status == noErr else {
-                        throw Fault.failedToTransferImage
-                    }
-                    return output
-                }
-                outputs.append(processedBuffer)
-            }
+            // Run in an unstructured task so cancelling the caller cannot abandon a frame that is
+            // still inside VideoToolbox; see `stop()`.
+            outputs = try await Task { try await self.runProcessor(parameters) }.value
 
             if !outputs.isEmpty && !modelReady {
                 modelReady = true
@@ -233,21 +235,56 @@ actor RealTimeFrameInterpolation {
                    Date().timeIntervalSince(startTime) > kModelLoadTimeoutSeconds {
                     modelFailed = true
                     print("   ❌ Model failed to load after \(Int(kModelLoadTimeoutSeconds))s — resolution unsupported on this device")
-                    return [currentBuffer]
+                    return passthrough
                 }
 
                 if passthroughCount <= 3 || passthroughCount % 60 == 0 {
                     print("   ℹ️ Frame processor model loading (frame \(passthroughCount)), passing through")
                 }
-                return [currentBuffer]
+                return passthrough
             }
             print("   ❌ Frame interpolation error: domain=\(ns.domain) code=\(ns.code) \(ns.localizedDescription)")
             throw error
         }
 
         if outputs.isEmpty {
-            return [currentBuffer]
+            return passthrough
         }
+        return outputs
+    }
+
+    /// Feeds one frame pair to VideoToolbox and waits for every output frame.
+    private func runProcessor(_ parameters: VTLowLatencyFrameInterpolationParameters) async throws -> [SendablePixelBuffer] {
+        var outputs: [SendablePixelBuffer] = []
+        var firstError: Error?
+        for try await readOnlyFrame in frameProcessor.process(parameters: parameters) {
+            // Keep draining after a failure so no output handler outlives this call.
+            guard firstError == nil else { continue }
+            do {
+                let processedBuffer = try readOnlyFrame.frame.withUnsafeBuffer { readOnlyPixelBuffer -> SendablePixelBuffer in
+                    let output = try Self.createPixelBuffer(from: pixelBufferPool)
+
+                    var copySession: VTPixelTransferSession?
+                    guard VTPixelTransferSessionCreate(allocator: kCFAllocatorDefault,
+                                                      pixelTransferSessionOut: &copySession) == noErr,
+                          let session = copySession
+                    else {
+                        throw Fault.failedToCreateOutputBuffer
+                    }
+
+                    let status = VTPixelTransferSessionTransferImage(session, from: readOnlyPixelBuffer, to: output)
+                    VTPixelTransferSessionInvalidate(session)
+                    guard status == noErr else {
+                        throw Fault.failedToTransferImage
+                    }
+                    return SendablePixelBuffer(buffer: output)
+                }
+                outputs.append(processedBuffer)
+            } catch {
+                firstError = error
+            }
+        }
+        if let firstError { throw firstError }
         return outputs
     }
 
@@ -342,8 +379,8 @@ actor RealTimeFrameInterpolation {
     // MARK: - Diagnostic helpers
 
     /// Creates a black (zeroed) source buffer suitable for model warm-up / diagnostics.
-    func createSyntheticSourceBuffer() throws -> CVPixelBuffer {
-        return try Self.createPixelBuffer(from: sourcePixelBufferPool)
+    func createSyntheticSourceBuffer() throws -> SendablePixelBuffer {
+        SendablePixelBuffer(buffer: try Self.createPixelBuffer(from: sourcePixelBufferPool))
     }
 
     // MARK: - Static helpers
@@ -384,9 +421,17 @@ actor RealTimeFrameInterpolation {
     }
 }
 
+// MARK: - Isolation hand-off
+
+/// Carries a pixel buffer across an isolation boundary.
+/// `CVPixelBuffer` is not `Sendable`; this is safe here because a buffer is never written
+/// again once it has been handed off.
+nonisolated struct SendablePixelBuffer: @unchecked Sendable {
+    let buffer: CVPixelBuffer
+}
+
 // MARK: - Errors
 
-@available(macOS 14.0, *)
 enum Fault: Error {
     case rejectedByCapabilities
     case unsupportedProcessor

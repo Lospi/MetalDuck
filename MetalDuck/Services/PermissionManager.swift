@@ -5,6 +5,7 @@
 //  Created by Roberto Camargo on 07/11/25.
 //
 
+@preconcurrency import ApplicationServices
 import AVFoundation
 import Foundation
 import ScreenCaptureKit
@@ -15,12 +16,7 @@ class PermissionManager {
     private init() {}
     
     var hasScreenRecordingPermission: Bool {
-        if #available(macOS 12.3, *) {
-            return CGPreflightScreenCaptureAccess()
-        } else {
-            // Fallback for older macOS versions
-            return CGPreflightScreenCaptureAccess()
-        }
+        CGPreflightScreenCaptureAccess()
     }
     
     func requestScreenRecordingPermission() async -> Bool {
@@ -28,17 +24,7 @@ class PermissionManager {
             return true
         }
         
-        if #available(macOS 12.3, *) {
-            return CGRequestScreenCaptureAccess()
-        } else {
-            // For older macOS, use the legacy method
-            return await withCheckedContinuation { continuation in
-                DispatchQueue.main.async {
-                    let result = CGRequestScreenCaptureAccess()
-                    continuation.resume(returning: result)
-                }
-            }
-        }
+        return CGRequestScreenCaptureAccess()
     }
     
     var hasAccessibilityPermission: Bool {

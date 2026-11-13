@@ -15,16 +15,12 @@ class VideoToolboxUpscaler {
     private var settings: UpscaleSettings
 
     // Super-resolution scaler
-    @available(macOS 14.0, *)
     private var superResolutionFrameProcessor: VTFrameProcessor?
 
-    @available(macOS 14.0, *)
     private var superResolutionConfiguration: VTLowLatencySuperResolutionScalerConfiguration?
 
-    @available(macOS 14.0, *)
     private var superResolutionPixelBufferPool: CVPixelBufferPool?
 
-    @available(macOS 14.0, *)
     private var superResolutionSessionStarted = false
 
     // Source frame rate (default to 30fps, can be updated)
@@ -33,9 +29,7 @@ class VideoToolboxUpscaler {
     init(settings: UpscaleSettings) {
         self.settings = settings
         setupTransferSession()
-        if #available(macOS 14.0, *) {
-            setupAdvancedFeatures()
-        }
+        setupAdvancedFeatures()
     }
 
     private func setupTransferSession() {
@@ -50,7 +44,6 @@ class VideoToolboxUpscaler {
         self.transferSession = transferSession
     }
 
-    @available(macOS 14.0, *)
     private func setupAdvancedFeatures() {
         guard settings.superResolutionEnabled || settings.mode == .superResolution else {
             return
@@ -62,7 +55,6 @@ class VideoToolboxUpscaler {
         setupSuperResolutionScaler()
     }
 
-    @available(macOS 14.0, *)
     private func setupSuperResolutionScaler() {
         print("🔧 Setting up Super Resolution Scaler...")
 
@@ -112,13 +104,11 @@ class VideoToolboxUpscaler {
         let sourceResolutionChanged = oldSourceResolution != settings.sourceResolution
         let targetResolutionChanged = oldTargetResolution != settings.targetResolution
 
-        if #available(macOS 14.0, *) {
-            if settings.superResolutionEnabled || settings.mode == .superResolution {
-                if sourceResolutionChanged || targetResolutionChanged {
-                    print("   ✅ Reconfiguring Super Resolution (resolution changed)")
-                }
-                setupSuperResolutionScaler()
+        if settings.superResolutionEnabled || settings.mode == .superResolution {
+            if sourceResolutionChanged || targetResolutionChanged {
+                print("   ✅ Reconfiguring Super Resolution (resolution changed)")
             }
+            setupSuperResolutionScaler()
         }
     }
 
@@ -140,10 +130,8 @@ class VideoToolboxUpscaler {
             print("🔄 VideoToolboxUpscaler: Source resolution updated: \(currentWidth)x\(currentHeight) → \(actualWidth)x\(actualHeight)")
             settings.sourceResolution = CGSize(width: actualWidth, height: actualHeight)
 
-            if #available(macOS 14.0, *) {
-                if settings.superResolutionEnabled || settings.mode == .superResolution {
-                    setupSuperResolutionScaler()
-                }
+            if settings.superResolutionEnabled || settings.mode == .superResolution {
+                setupSuperResolutionScaler()
             }
         }
     }
@@ -161,16 +149,12 @@ class VideoToolboxUpscaler {
 
         switch settings.mode {
         case .superResolution:
-            if #available(macOS 14.0, *) {
-                return await upscaleWithSuperResolution(pixelBuffer: pixelBuffer)
-            } else {
-                return fallbackUpscale(pixelBuffer: pixelBuffer)
-            }
+            return await upscaleWithSuperResolution(pixelBuffer: pixelBuffer)
         case .frameInterpolation:
             // Interpolation handled upstream; passthrough here
             return pixelBuffer
         case .temporal, .quality, .spatial:
-            if #available(macOS 14.0, *), settings.superResolutionEnabled {
+            if settings.superResolutionEnabled {
                 return await upscaleWithSuperResolution(pixelBuffer: pixelBuffer)
             } else {
                 return fallbackUpscale(pixelBuffer: pixelBuffer)
@@ -178,7 +162,6 @@ class VideoToolboxUpscaler {
         }
     }
 
-    @available(macOS 14.0, *)
     private func upscaleWithSuperResolution(pixelBuffer: CVPixelBuffer) async -> CVPixelBuffer? {
         guard let processor = superResolutionFrameProcessor,
               let configuration = superResolutionConfiguration,
@@ -343,18 +326,16 @@ class VideoToolboxUpscaler {
         return (status == kCVReturnSuccess) ? outputBuffer : nil
     }
 
-    deinit {
+    isolated deinit {
         if let session = transferSession {
             VTPixelTransferSessionInvalidate(session)
         }
 
-        if #available(macOS 14.0, *) {
-            if superResolutionSessionStarted, let processor = superResolutionFrameProcessor {
-                processor.endSession()
-            }
-            superResolutionFrameProcessor = nil
-            superResolutionConfiguration = nil
-            superResolutionPixelBufferPool = nil
+        if superResolutionSessionStarted, let processor = superResolutionFrameProcessor {
+            processor.endSession()
         }
+        superResolutionFrameProcessor = nil
+        superResolutionConfiguration = nil
+        superResolutionPixelBufferPool = nil
     }
 }

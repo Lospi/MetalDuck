@@ -72,6 +72,8 @@ struct UpscaleSettings: Codable {
     var interpolationMultiplier: Int = 2
     var processingResolution: ProcessingResolution = .p720
     var spatialUpscaleEnabled: Bool = false
+    /// Lower the processing resolution for the session when interpolation cannot keep up with capture.
+    var autoStepDownEnabled: Bool = true
     
     init() {
         self.mode = .temporal

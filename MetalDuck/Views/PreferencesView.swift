@@ -104,9 +104,7 @@ struct PreferencesView: View {
                         loadAvailableTargets()
                     }
                     Button("Content Picker") {
-                        if #available(macOS 12.3, *) {
-                            AppCoordinator.shared.presentPicker()
-                        }
+                        AppCoordinator.shared.presentPicker()
                     }
                 }
             } header: {
@@ -129,6 +127,15 @@ struct PreferencesView: View {
                     }
 
                     resolutionWarning
+
+                    Toggle("Lower Resolution Automatically", isOn: $upscaleSettings.autoStepDownEnabled)
+
+                    Label(
+                        "If interpolation can't keep up with the capture rate, a lower processing resolution is used until capture stops.",
+                        systemImage: "arrow.down.right.circle"
+                    )
+                    .font(.caption)
+                    .foregroundColor(.secondary)
 
                     Toggle("2x Upscale", isOn: $upscaleSettings.spatialUpscaleEnabled)
 
@@ -196,6 +203,10 @@ struct PreferencesView: View {
             AppCoordinator.shared.updateUpscaleSettings(upscaleSettings)
             restartCaptureIfNeeded()
         }
+        .onChange(of: upscaleSettings.autoStepDownEnabled) { _, _ in
+            AppCoordinator.shared.updateUpscaleSettings(upscaleSettings)
+            restartCaptureIfNeeded()
+        }
         .onChange(of: upscaleSettings.spatialUpscaleEnabled) { _, newValue in
             if newValue && upscaleSettings.interpolationMultiplier != 2 {
                 upscaleSettings.interpolationMultiplier = 2
@@ -213,9 +224,7 @@ struct PreferencesView: View {
             restartCaptureIfNeeded()
         }
         .sheet(isPresented: $showDiagnostics) {
-            if #available(macOS 14.0, *) {
-                DiagnosticsView()
-            }
+            DiagnosticsView()
         }
         .onAppear {
             if captureSettings.targetWindowID != nil {
@@ -308,7 +317,6 @@ struct PreferencesView: View {
         }
     }
 
-    @available(macOS 12.3, *)
     private func loadAvailableTargets() {
         isLoading = true
 

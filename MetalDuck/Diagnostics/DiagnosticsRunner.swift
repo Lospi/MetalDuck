@@ -14,6 +14,7 @@ import Darwin
 import Foundation
 import IOKit
 import Metal
+import ScreenCaptureKit
 @preconcurrency import VideoToolbox
 
 // MARK: - sysctl helpers
@@ -27,14 +28,13 @@ private func sysctlInt(_ name: String) -> Int? {
 private func sysctlString(_ name: String) -> String? {
     var size = 0
     guard sysctlbyname(name, nil, &size, nil, 0) == 0, size > 0 else { return nil }
-    var buffer = [CChar](repeating: 0, count: size)
+    var buffer = [UInt8](repeating: 0, count: size)
     guard sysctlbyname(name, &buffer, &size, nil, 0) == 0 else { return nil }
-    return String(cString: buffer)
+    return String(decoding: buffer.prefix { $0 != 0 }, as: UTF8.self)
 }
 
 // MARK: - DiagnosticsRunner
 
-@available(macOS 14.0, *)
 @Observable @MainActor
 final class DiagnosticsRunner {
 
@@ -79,6 +79,8 @@ final class DiagnosticsRunner {
         let gpuCores: Int?
         let memoryGB: Int
         let macOSVersion: String
+        /// nil when the OS cannot answer (macOS 26).
+        var screenRecordingAvailable: Bool?
     }
 
     // MARK: - Published State
@@ -179,8 +181,15 @@ final class DiagnosticsRunner {
             efficiencyCores: eCores,
             gpuCores: Self.gpuCoreCount(),
             memoryGB: memGB,
-            macOSVersion: ProcessInfo.processInfo.operatingSystemVersionString
+            macOSVersion: ProcessInfo.processInfo.operatingSystemVersionString,
+            screenRecordingAvailable: Self.screenRecordingAvailability()
         )
+    }
+
+    /// macOS 27 reports whether screen recording is supported and allowed on this Mac.
+    private static func screenRecordingAvailability() -> Bool? {
+        guard #available(macOS 27.0, *) else { return nil }
+        return SCContentSharingPicker.shared.isAvailable
     }
 
     /// Reads `gpu-core-count` from the AGXAccelerator IOKit service (Apple Silicon only).
@@ -234,7 +243,7 @@ final class DiagnosticsRunner {
 
             let srcBuffer: CVPixelBuffer
             do {
-                srcBuffer = try await interpolator.createSyntheticSourceBuffer()
+                srcBuffer = try await interpolator.createSyntheticSourceBuffer().buffer
             } catch {
                 await interpolator.stop()
                 return .failed("Buffer allocation failed")
@@ -242,7 +251,7 @@ final class DiagnosticsRunner {
 
             let outputs: [CVPixelBuffer]
             do {
-                outputs = try await interpolator.process(currentBuffer: srcBuffer, currentTimestamp: pts)
+                outputs = try await interpolator.process(currentBuffer: srcBuffer, currentTimestamp: pts).map(\.buffer)
             } catch {
                 await interpolator.stop()
                 return .failed(error.localizedDescription)
@@ -340,6 +349,9 @@ final class DiagnosticsRunner {
             }
             lines.append("- **Memory:** \(info.memoryGB) GB")
             lines.append("- **macOS:** \(info.macOSVersion)")
+            if let available = info.screenRecordingAvailable {
+                lines.append("- **Screen recording available:** \(available ? "Yes" : "No")")
+            }
             lines.append("")
         }
 

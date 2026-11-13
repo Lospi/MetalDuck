@@ -9,6 +9,7 @@ import CoreGraphics
 import Testing
 @testable import MetalDuck
 
+@MainActor
 struct UpscaleSettingsTests {
 
     @Test(

@@ -10,22 +10,16 @@ import CoreMedia
 import Foundation
 import ScreenCaptureKit
 
-@available(macOS 12.3, *)
-class ScreenCaptureManager: NSObject {
+class ScreenCaptureManager {
     private var captureSession: CaptureSession?
     private let settings: CaptureSettings
 
-    /// Called when the user picks content from the sharing picker.
-    var onPickerFilterSelected: ((SCContentFilter) -> Void)?
-
     init(settings: CaptureSettings) {
         self.settings = settings
-        super.init()
-        SCContentSharingPicker.shared.add(self)
-        SCContentSharingPicker.shared.isActive = true
     }
 
-    func startCapture() async throws -> AsyncThrowingStream<CapturedFrame, Error> {
+    /// Starts capturing `filter`, or the target from the settings when no filter is given.
+    func startCapture(filter: SCContentFilter? = nil) async throws -> AsyncThrowingStream<CapturedFrame, Error> {
         if !PermissionManager.shared.hasScreenRecordingPermission {
             let granted = await PermissionManager.shared.requestScreenRecordingPermission()
             guard granted else {
@@ -34,7 +28,7 @@ class ScreenCaptureManager: NSObject {
         }
 
         captureSession = CaptureSession(settings: settings)
-        return try await captureSession!.startCapture()
+        return try await captureSession!.startCapture(filter: filter)
     }
 
     var isCapturing: Bool {
@@ -50,19 +44,9 @@ class ScreenCaptureManager: NSObject {
         try await captureSession?.updateFrameRate(frameRate)
     }
 
-    // MARK: - Content Picker
-
-    func presentPicker() {
-        SCContentSharingPicker.shared.present()
-    }
-
-    func applyPickerFilter(_ filter: SCContentFilter) async {
-        if captureSession != nil {
-            await captureSession?.updateContentFilter(filter)
-        } else {
-            // Capture not running — notify coordinator to start with this filter
-            onPickerFilterSelected?(filter)
-        }
+    /// Switches a running capture to different content.
+    func updateContentFilter(_ filter: SCContentFilter) async {
+        await captureSession?.updateContentFilter(filter)
     }
 
     static func getAvailableWindows() async -> [SCWindow] {
@@ -82,22 +66,5 @@ class ScreenCaptureManager: NSObject {
     enum CaptureError: Error {
         case permissionDenied
         case sessionNotStarted
-    }
-}
-
-@available(macOS 12.3, *)
-extension ScreenCaptureManager: SCContentSharingPickerObserver {
-    nonisolated func contentSharingPicker(_ picker: SCContentSharingPicker, didCancelFor stream: SCStream?) {
-        // no-op
-    }
-
-    nonisolated func contentSharingPicker(_ picker: SCContentSharingPicker, didUpdateWith filter: SCContentFilter, for stream: SCStream?) {
-        Task { [weak self] in
-            await self?.applyPickerFilter(filter)
-        }
-    }
-
-    nonisolated func contentSharingPickerStartDidFailWithError(_ error: Error) {
-        // no-op
     }
 }

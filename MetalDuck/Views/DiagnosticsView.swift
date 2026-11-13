@@ -10,7 +10,6 @@
 
 import SwiftUI
 
-@available(macOS 14.0, *)
 struct DiagnosticsView: View {
     @State private var runner = DiagnosticsRunner()
     @Environment(\.dismiss) private var dismiss

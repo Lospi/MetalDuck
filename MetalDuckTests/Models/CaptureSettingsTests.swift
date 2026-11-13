@@ -9,6 +9,7 @@ import CoreMedia
 import Testing
 @testable import MetalDuck
 
+@MainActor
 struct CaptureSettingsTests {
 
     @Test("Capture settings default to manual 60 FPS", .tags(.settings))
@@ -53,5 +54,18 @@ struct CaptureSettingsTests {
     @Test("Auto capture sampling ceiling is 120 FPS", .tags(.settings))
     func autoSamplingCeilingIsOneTwentyFPS() {
         #expect(CaptureSettings.autoFrameRateSamplingCeiling == 120)
+    }
+
+    @Test("A target exists only once a window or display is chosen")
+    func hasTargetReflectsChosenContent() {
+        var settings = CaptureSettings()
+        #expect(!settings.hasTarget)
+
+        settings.targetDisplayID = 1
+        #expect(settings.hasTarget)
+
+        settings.targetDisplayID = nil
+        settings.targetWindowID = 42
+        #expect(settings.hasTarget)
     }
 }

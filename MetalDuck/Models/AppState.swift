@@ -12,6 +12,8 @@ import SwiftUI
 @Observable
 class AppState {
     var isCapturing: Bool = false
+    /// True from the moment a start request is accepted until the stream is running or the start fails.
+    private(set) var isStarting: Bool = false
     var isUpscaling: Bool = false
     var isOverlayVisible: Bool = false
     var currentFPS: Double = 0.0
@@ -21,7 +23,21 @@ class AppState {
     // Menu bar state
     var menuBarItem: NSStatusItem?
     
+    /// Claims the right to start a capture. Returns false when one is already running or starting,
+    /// so overlapping start requests collapse into one.
+    func beginStarting() -> Bool {
+        guard !isCapturing, !isStarting else { return false }
+        isStarting = true
+        return true
+    }
+
+    /// Releases the claim made by `beginStarting()` when the start did not go through.
+    func cancelStarting() {
+        isStarting = false
+    }
+
     func startCapture() {
+        isStarting = false
         isCapturing = true
         isOverlayVisible = true
     }
