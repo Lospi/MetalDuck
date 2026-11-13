@@ -14,6 +14,7 @@ import Darwin
 import Foundation
 import IOKit
 import Metal
+import ScreenCaptureKit
 @preconcurrency import VideoToolbox
 
 // MARK: - sysctl helpers
@@ -78,6 +79,8 @@ final class DiagnosticsRunner {
         let gpuCores: Int?
         let memoryGB: Int
         let macOSVersion: String
+        /// nil when the OS cannot answer (macOS 26).
+        var screenRecordingAvailable: Bool?
     }
 
     // MARK: - Published State
@@ -178,8 +181,15 @@ final class DiagnosticsRunner {
             efficiencyCores: eCores,
             gpuCores: Self.gpuCoreCount(),
             memoryGB: memGB,
-            macOSVersion: ProcessInfo.processInfo.operatingSystemVersionString
+            macOSVersion: ProcessInfo.processInfo.operatingSystemVersionString,
+            screenRecordingAvailable: Self.screenRecordingAvailability()
         )
+    }
+
+    /// macOS 27 reports whether screen recording is supported and allowed on this Mac.
+    private static func screenRecordingAvailability() -> Bool? {
+        guard #available(macOS 27.0, *) else { return nil }
+        return SCContentSharingPicker.shared.isAvailable
     }
 
     /// Reads `gpu-core-count` from the AGXAccelerator IOKit service (Apple Silicon only).
@@ -339,6 +349,9 @@ final class DiagnosticsRunner {
             }
             lines.append("- **Memory:** \(info.memoryGB) GB")
             lines.append("- **macOS:** \(info.macOSVersion)")
+            if let available = info.screenRecordingAvailable {
+                lines.append("- **Screen recording available:** \(available ? "Yes" : "No")")
+            }
             lines.append("")
         }
 
