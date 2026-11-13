@@ -8,6 +8,7 @@
 import Testing
 
 extension Tag {
+    @Tag static var capture: Self
     @Tag static var settings: Self
     @Tag static var upscaling: Self
     @Tag static var timing: Self
