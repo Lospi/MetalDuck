@@ -94,7 +94,7 @@ class AppCoordinator {
     }
 
     func startCapture() async {
-        guard !appState.isCapturing else { return }
+        guard !appState.isCapturing, !appState.isStarting else { return }
 
         if !PermissionManager.shared.hasScreenRecordingPermission {
             let granted = await PermissionManager.shared.requestScreenRecordingPermission()
@@ -118,9 +118,12 @@ class AppCoordinator {
 
     /// Starts capturing `filter`, or the Preferences target when `filter` is nil.
     private func beginCapture(filter: SCContentFilter?) async {
-        guard !appState.isCapturing else { return }
+        // Starting the stream suspends, so a second request could otherwise slip in before
+        // `isCapturing` is set and start a second, orphaned stream.
+        guard appState.beginStarting() else { return }
 
         guard let overlay = overlayManager else {
+            appState.cancelStarting()
             appState.setError("Overlay not initialized")
             return
         }
@@ -154,6 +157,7 @@ class AppCoordinator {
                 }
             }
         } catch {
+            appState.cancelStarting()
             // The picked content may no longer exist; ask again on the next start.
             if filter != nil { pickedFilter = nil }
             appState.setError("Failed to start capture: \(error.localizedDescription)")
