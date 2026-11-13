@@ -41,20 +41,18 @@ struct ContentView: View {
                     .padding()
             }
             
-            HStack {
-                Button("Start Capture") {
-                    Task {
-                        await coordinator.startCapture()
-                    }
-                }
-                .disabled(coordinator.appState.isCapturing)
-                
+            if coordinator.appState.isCapturing {
                 Button("Stop Capture") {
                     Task {
                         await coordinator.stopCapture()
                     }
                 }
-                .disabled(!coordinator.appState.isCapturing)
+            } else {
+                Button("Start Capture") {
+                    Task {
+                        await coordinator.startCapture()
+                    }
+                }
             }
         }
         .padding()
