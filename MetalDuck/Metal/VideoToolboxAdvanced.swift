@@ -186,23 +186,13 @@ extension CVPixelBuffer {
     
     /// Propagates attachments from source to destination sample buffer
     func propagateAttachments(to destination: CMSampleBuffer) {
-        // Get all attachments from the pixel buffer
-        // CVBufferGetAttachments requires a CVAttachmentMode parameter
-        // CVAttachmentMode is a typealias for UInt32, so we can use 0 to get all attachments
-        guard let attachmentMode = CVAttachmentMode(rawValue: 0) else {
+        // Same attachment set as before: mode 0 is `.shouldNotPropagate`.
+        guard let attachments = CVBufferCopyAttachments(self, .shouldNotPropagate) as? [CFString: Any] else {
             return
         }
-        guard let attachmentsDict = CVBufferGetAttachments(self, attachmentMode) as? [CFString: Any] else {
-            return
-        }
-        
-        for (key, value) in attachmentsDict {
-            // CMSetAttachment expects CFString for key and CFTypeRef for value
-            // value needs to be a class type (CFTypeRef), so we cast it
-            guard let cfValue = value as? CFTypeRef else {
-                continue
-            }
-            CMSetAttachment(destination, key: key, value: cfValue, attachmentMode: kCMAttachmentMode_ShouldPropagate)
+
+        for (key, value) in attachments {
+            CMSetAttachment(destination, key: key, value: value as CFTypeRef, attachmentMode: kCMAttachmentMode_ShouldPropagate)
         }
     }
 }
