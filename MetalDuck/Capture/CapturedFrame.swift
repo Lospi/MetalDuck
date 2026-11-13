@@ -25,7 +25,6 @@ struct CapturedFrame: @unchecked Sendable {
     var size: CGSize { contentRect.size }
 }
 
-@available(macOS 12.3, *)
 extension CapturedFrame {
     /// Creates a CapturedFrame from a CMSampleBuffer produced by SCStream.
     /// Returns nil if the frame status is not `.complete` or required data is missing.

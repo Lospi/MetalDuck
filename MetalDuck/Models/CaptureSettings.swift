@@ -13,7 +13,6 @@ enum DynamicRangePreset: String, Codable, CaseIterable {
     case localDisplayHDR = "Local Display HDR"
     case canonicalDisplayHDR = "Canonical Display HDR"
     
-    @available(macOS 15.0, *)
     var scDynamicRangePreset: SCStreamConfiguration.Preset? {
         switch self {
         case .localDisplayHDR:
@@ -52,7 +51,6 @@ struct CaptureSettings: Codable {
         return CMTime(value: 1, timescale: CMTimeScale(clampedFrameRate))
     }
     
-    @available(macOS 12.3, *)
     func contentFilter() async -> SCContentFilter? {
         guard let content = try? await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true) else {
             return nil

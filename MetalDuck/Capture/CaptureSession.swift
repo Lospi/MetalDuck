@@ -10,7 +10,6 @@ import ScreenCaptureKit
 import CoreVideo
 import CoreMedia
 
-@available(macOS 12.3, *)
 class CaptureSession {
     private var stream: SCStream?
     private var streamConfig: SCStreamConfiguration?
@@ -29,7 +28,7 @@ class CaptureSession {
         }
 
         let streamConfig: SCStreamConfiguration
-        if #available(macOS 15.0, *), let preset = settings.selectedDynamicRangePreset?.scDynamicRangePreset {
+        if let preset = settings.selectedDynamicRangePreset?.scDynamicRangePreset {
             streamConfig = SCStreamConfiguration(preset: preset)
         } else {
             streamConfig = SCStreamConfiguration()
@@ -95,7 +94,6 @@ class CaptureSession {
     }
 }
 
-@available(macOS 12.3, *)
 private class StreamOutput: NSObject, SCStreamOutput {
     private let continuation: AsyncThrowingStream<CapturedFrame, Error>.Continuation
 

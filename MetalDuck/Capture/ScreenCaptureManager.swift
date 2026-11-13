@@ -10,7 +10,6 @@ import CoreMedia
 import Foundation
 import ScreenCaptureKit
 
-@available(macOS 12.3, *)
 class ScreenCaptureManager: NSObject {
     private var captureSession: CaptureSession?
     private let settings: CaptureSettings
@@ -85,7 +84,6 @@ class ScreenCaptureManager: NSObject {
     }
 }
 
-@available(macOS 12.3, *)
 extension ScreenCaptureManager: SCContentSharingPickerObserver {
     nonisolated func contentSharingPicker(_ picker: SCContentSharingPicker, didCancelFor stream: SCStream?) {
         // no-op

@@ -28,7 +28,6 @@ class AppCoordinator {
     private let updaterDelegate = UpdaterDelegate()
     private var updaterController: SPUStandardUpdaterController?
 
-    @available(macOS 14.0, *)
     private var interpolator: RealTimeFrameInterpolation?
 
     private var frameCount = 0
@@ -96,41 +95,35 @@ class AppCoordinator {
             return
         }
 
-        if #available(macOS 12.3, *) {
-            // Match capture resolution to window size before starting capture
-            await matchCaptureResolutionToWindow()
-            prepareCaptureFrameRateForStart()
+        // Match capture resolution to window size before starting capture
+        await matchCaptureResolutionToWindow()
+        prepareCaptureFrameRateForStart()
 
-            captureManager = ScreenCaptureManager(settings: activeCaptureSettings)
+        captureManager = ScreenCaptureManager(settings: activeCaptureSettings)
 
-            do {
-                let stream = try await captureManager!.startCapture()
-                appState.startCapture()
+        do {
+            let stream = try await captureManager!.startCapture()
+            appState.startCapture()
 
-                if #available(macOS 14.0, *) {
-                    interpolator = nil
-                }
-                resetRuntimeFallbacks()
+            interpolator = nil
+            resetRuntimeFallbacks()
 
-                createDisplayForCapture(overlay: overlay)
+            createDisplayForCapture(overlay: overlay)
 
-                captureTask = Task { [weak self] in
-                    do {
-                        for try await frame in stream {
-                            await self?.processFrame(frame)
-                        }
-                    } catch {
-                        await MainActor.run {
-                            self?.appState.setError("Capture stream error: \(error.localizedDescription)")
-                        }
-                        await self?.stopCapture()
+            captureTask = Task { [weak self] in
+                do {
+                    for try await frame in stream {
+                        await self?.processFrame(frame)
                     }
+                } catch {
+                    await MainActor.run {
+                        self?.appState.setError("Capture stream error: \(error.localizedDescription)")
+                    }
+                    await self?.stopCapture()
                 }
-            } catch {
-                appState.setError("Failed to start capture: \(error.localizedDescription)")
             }
-        } else {
-            appState.setError("ScreenCaptureKit requires macOS 12.3 or later")
+        } catch {
+            appState.setError("Failed to start capture: \(error.localizedDescription)")
         }
     }
 
@@ -144,16 +137,12 @@ class AppCoordinator {
         captureTask = nil
         task?.cancel()
 
-        if #available(macOS 12.3, *) {
-            await captureManager?.stopCapture()
-            captureManager = nil
-        }
+        await captureManager?.stopCapture()
+        captureManager = nil
 
         // Stop the interpolator's VTFrameProcessor session
-        if #available(macOS 14.0, *) {
-            await interpolator?.stop()
-            interpolator = nil
-        }
+        await interpolator?.stop()
+        interpolator = nil
 
         overlayManager?.close()
         lastFrameTimestamp = nil
@@ -186,9 +175,7 @@ class AppCoordinator {
 
 
         // If interpolation is enabled, run through interpolator
-        if #available(macOS 14.0, *),
-           upscaleSettings.mode == .frameInterpolation || upscaleSettings.frameInterpolationEnabled
-        {
+        if upscaleSettings.mode == .frameInterpolation || upscaleSettings.frameInterpolationEnabled {
             if interpolationUnsupported {
                 appState.processingStatus = "Interpolation unsupported on this device"
                 overlay.displayBufferImmediate(frame.pixelBuffer)
@@ -293,7 +280,7 @@ class AppCoordinator {
             lastFPSTime = now
 
             var processingRes: CGSize? = nil
-            if #available(macOS 14.0, *), let interp = interpolator {
+            if let interp = interpolator {
                 let outDims = interp.outputDimensions
                 processingRes = CGSize(width: CGFloat(outDims.width), height: CGFloat(outDims.height))
             }
@@ -382,7 +369,6 @@ class AppCoordinator {
 
     // MARK: - Picker
 
-    @available(macOS 12.3, *)
     func presentPicker() {
         if captureManager == nil {
             captureManager = ScreenCaptureManager(settings: activeCaptureSettings)
@@ -395,7 +381,6 @@ class AppCoordinator {
         captureManager?.presentPicker()
     }
 
-    @available(macOS 12.3, *)
     private func startCaptureWithFilter(_ filter: SCContentFilter) async {
         // If already capturing, the filter was applied to the running session
         guard !appState.isCapturing else { return }
@@ -410,9 +395,7 @@ class AppCoordinator {
             await captureManager?.applyPickerFilter(filter)
             appState.startCapture()
 
-            if #available(macOS 14.0, *) {
-                interpolator = nil
-            }
+            interpolator = nil
             resetRuntimeFallbacks()
 
             createDisplayForCapture(overlay: overlay)
