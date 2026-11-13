@@ -104,9 +104,7 @@ struct PreferencesView: View {
                         loadAvailableTargets()
                     }
                     Button("Content Picker") {
-                        if #available(macOS 12.3, *) {
-                            AppCoordinator.shared.presentPicker()
-                        }
+                        AppCoordinator.shared.presentPicker()
                     }
                 }
             } header: {
@@ -213,9 +211,7 @@ struct PreferencesView: View {
             restartCaptureIfNeeded()
         }
         .sheet(isPresented: $showDiagnostics) {
-            if #available(macOS 14.0, *) {
-                DiagnosticsView()
-            }
+            DiagnosticsView()
         }
         .onAppear {
             if captureSettings.targetWindowID != nil {
@@ -308,7 +304,6 @@ struct PreferencesView: View {
         }
     }
 
-    @available(macOS 12.3, *)
     private func loadAvailableTargets() {
         isLoading = true
 

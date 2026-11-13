@@ -16,7 +16,6 @@ import CoreVideo
 import Foundation
 @preconcurrency import VideoToolbox
 
-@available(macOS 14.0, *)
 class VideoToolboxAdvanced {
     // MARK: - Super Resolution Scaler
     

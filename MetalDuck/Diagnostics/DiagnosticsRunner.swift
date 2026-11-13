@@ -34,7 +34,6 @@ private func sysctlString(_ name: String) -> String? {
 
 // MARK: - DiagnosticsRunner
 
-@available(macOS 14.0, *)
 @Observable @MainActor
 final class DiagnosticsRunner {
 

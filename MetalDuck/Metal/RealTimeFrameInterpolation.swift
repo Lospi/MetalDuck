@@ -19,7 +19,6 @@ import AVFoundation
 /// a frame by this time, it's considered unsupported at this resolution.
 private nonisolated let kModelLoadTimeoutSeconds: Double = 5.0
 
-@available(macOS 14.0, *)
 actor RealTimeFrameInterpolation {
 
     // MARK: - Configuration
@@ -386,7 +385,6 @@ actor RealTimeFrameInterpolation {
 
 // MARK: - Errors
 
-@available(macOS 14.0, *)
 enum Fault: Error {
     case rejectedByCapabilities
     case unsupportedProcessor
