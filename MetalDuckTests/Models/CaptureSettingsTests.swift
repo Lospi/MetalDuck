@@ -54,4 +54,17 @@ struct CaptureSettingsTests {
     func autoSamplingCeilingIsOneTwentyFPS() {
         #expect(CaptureSettings.autoFrameRateSamplingCeiling == 120)
     }
+
+    @Test("A target exists only once a window or display is chosen")
+    func hasTargetReflectsChosenContent() {
+        var settings = CaptureSettings()
+        #expect(!settings.hasTarget)
+
+        settings.targetDisplayID = 1
+        #expect(settings.hasTarget)
+
+        settings.targetDisplayID = nil
+        settings.targetWindowID = 42
+        #expect(settings.hasTarget)
+    }
 }

@@ -103,7 +103,14 @@ class AppCoordinator {
 
         ensureContentPicker()
 
-        await beginCapture(filter: pickedFilter)
+        if let pickedFilter {
+            await beginCapture(filter: pickedFilter)
+        } else if captureSettings.hasTarget {
+            await beginCapture(filter: nil)
+        } else {
+            // Nothing has been chosen yet: ask, and start once the user picks.
+            presentPicker()
+        }
     }
 
     /// Starts capturing `filter`, or the Preferences target when `filter` is nil.

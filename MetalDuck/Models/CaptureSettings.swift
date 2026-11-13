@@ -42,6 +42,11 @@ struct CaptureSettings: Codable {
         self.selectedDynamicRangePreset = nil
     }
 
+    /// Whether a window or display has been chosen in Preferences.
+    var hasTarget: Bool {
+        targetWindowID != nil || targetDisplayID != nil
+    }
+
     var initialCaptureFrameRate: Int {
         autoFrameRateEnabled ? Self.autoFrameRateSamplingCeiling : frameRate
     }
