@@ -10,6 +10,10 @@ on:
       - main
       - v0.2
 
+# The job only reads the repository; do not grant the default token anything more.
+permissions:
+  contents: read
+
 jobs:
   build-and-test:
     name: Build and Test
