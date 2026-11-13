@@ -234,7 +234,7 @@ class AppCoordinator {
                 if let outputs = try await interpolator?.process(
                     currentBuffer: frame.pixelBuffer,
                     currentTimestamp: currentPTS
-                ) {
+                ).map(\.buffer) {
                     let isModelReady = await interpolator?.modelReady ?? false
 
                     if isModelReady {

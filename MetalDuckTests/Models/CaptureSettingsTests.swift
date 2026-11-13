@@ -9,6 +9,7 @@ import CoreMedia
 import Testing
 @testable import MetalDuck
 
+@MainActor
 struct CaptureSettingsTests {
 
     @Test("Capture settings default to manual 60 FPS", .tags(.settings))

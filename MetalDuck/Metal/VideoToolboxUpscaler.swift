@@ -326,7 +326,7 @@ class VideoToolboxUpscaler {
         return (status == kCVReturnSuccess) ? outputBuffer : nil
     }
 
-    deinit {
+    isolated deinit {
         if let session = transferSession {
             VTPixelTransferSessionInvalidate(session)
         }

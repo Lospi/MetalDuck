@@ -5,6 +5,7 @@
 //  Created by Roberto Camargo on 07/11/25.
 //
 
+@preconcurrency import ApplicationServices
 import AVFoundation
 import Foundation
 import ScreenCaptureKit

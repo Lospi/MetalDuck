@@ -12,7 +12,7 @@ import Darwin
 import IOSurface
 import ScreenCaptureKit
 
-struct CapturedFrame: @unchecked Sendable {
+nonisolated struct CapturedFrame: @unchecked Sendable {
     let surface: IOSurface
     let pixelBuffer: CVPixelBuffer
     let presentationTimestamp: CMTime
