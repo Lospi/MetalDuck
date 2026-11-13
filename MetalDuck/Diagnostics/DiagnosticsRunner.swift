@@ -233,7 +233,7 @@ final class DiagnosticsRunner {
 
             let srcBuffer: CVPixelBuffer
             do {
-                srcBuffer = try await interpolator.createSyntheticSourceBuffer()
+                srcBuffer = try await interpolator.createSyntheticSourceBuffer().buffer
             } catch {
                 await interpolator.stop()
                 return .failed("Buffer allocation failed")
@@ -241,7 +241,7 @@ final class DiagnosticsRunner {
 
             let outputs: [CVPixelBuffer]
             do {
-                outputs = try await interpolator.process(currentBuffer: srcBuffer, currentTimestamp: pts)
+                outputs = try await interpolator.process(currentBuffer: srcBuffer, currentTimestamp: pts).map(\.buffer)
             } catch {
                 await interpolator.stop()
                 return .failed(error.localizedDescription)

@@ -151,12 +151,13 @@ actor RealTimeFrameInterpolation {
 
     // MARK: - Processing
 
-    func process(currentBuffer: CVPixelBuffer, currentTimestamp: CMTime) async throws -> [CVPixelBuffer] {
+    func process(currentBuffer: CVPixelBuffer, currentTimestamp: CMTime) async throws -> [SendablePixelBuffer] {
+        let passthrough = [SendablePixelBuffer(buffer: currentBuffer)]
         guard sessionStarted else {
             throw Fault.sessionNotStarted
         }
         guard !modelFailed else {
-            return [currentBuffer]
+            return passthrough
         }
 
         // Downscale + verify source buffer
@@ -165,7 +166,7 @@ actor RealTimeFrameInterpolation {
         // Need previous frame for interpolation
         guard let previous = previousFrame else {
             previousFrame = (buffer: compatibleBuffer, timestamp: currentTimestamp)
-            return [currentBuffer]
+            return passthrough
         }
 
         guard let sourceFrame = VTFrameProcessorFrame(buffer: previous.buffer, presentationTimeStamp: previous.timestamp),
@@ -192,10 +193,10 @@ actor RealTimeFrameInterpolation {
         previousFrame = (buffer: compatibleBuffer, timestamp: currentTimestamp)
 
         // Process — NO retries with startSession
-        var outputs: [CVPixelBuffer] = []
+        var outputs: [SendablePixelBuffer] = []
         do {
             for try await readOnlyFrame in frameProcessor.process(parameters: parameters) {
-                let processedBuffer = try readOnlyFrame.frame.withUnsafeBuffer { readOnlyPixelBuffer -> CVPixelBuffer in
+                let processedBuffer = try readOnlyFrame.frame.withUnsafeBuffer { readOnlyPixelBuffer -> SendablePixelBuffer in
                     let output = try Self.createPixelBuffer(from: pixelBufferPool)
 
                     var copySession: VTPixelTransferSession?
@@ -211,7 +212,7 @@ actor RealTimeFrameInterpolation {
                     guard status == noErr else {
                         throw Fault.failedToTransferImage
                     }
-                    return output
+                    return SendablePixelBuffer(buffer: output)
                 }
                 outputs.append(processedBuffer)
             }
@@ -232,20 +233,20 @@ actor RealTimeFrameInterpolation {
                    Date().timeIntervalSince(startTime) > kModelLoadTimeoutSeconds {
                     modelFailed = true
                     print("   ❌ Model failed to load after \(Int(kModelLoadTimeoutSeconds))s — resolution unsupported on this device")
-                    return [currentBuffer]
+                    return passthrough
                 }
 
                 if passthroughCount <= 3 || passthroughCount % 60 == 0 {
                     print("   ℹ️ Frame processor model loading (frame \(passthroughCount)), passing through")
                 }
-                return [currentBuffer]
+                return passthrough
             }
             print("   ❌ Frame interpolation error: domain=\(ns.domain) code=\(ns.code) \(ns.localizedDescription)")
             throw error
         }
 
         if outputs.isEmpty {
-            return [currentBuffer]
+            return passthrough
         }
         return outputs
     }
@@ -341,8 +342,8 @@ actor RealTimeFrameInterpolation {
     // MARK: - Diagnostic helpers
 
     /// Creates a black (zeroed) source buffer suitable for model warm-up / diagnostics.
-    func createSyntheticSourceBuffer() throws -> CVPixelBuffer {
-        return try Self.createPixelBuffer(from: sourcePixelBufferPool)
+    func createSyntheticSourceBuffer() throws -> SendablePixelBuffer {
+        SendablePixelBuffer(buffer: try Self.createPixelBuffer(from: sourcePixelBufferPool))
     }
 
     // MARK: - Static helpers
@@ -381,6 +382,15 @@ actor RealTimeFrameInterpolation {
         }
         return buffer
     }
+}
+
+// MARK: - Isolation hand-off
+
+/// Carries a pixel buffer across an isolation boundary.
+/// `CVPixelBuffer` is not `Sendable`; this is safe here because a buffer is never written
+/// again once it has been handed off.
+nonisolated struct SendablePixelBuffer: @unchecked Sendable {
+    let buffer: CVPixelBuffer
 }
 
 // MARK: - Errors

@@ -1,6 +1,7 @@
 import Testing
 @testable import MetalDuck
 
+@MainActor
 struct VideoProcessingCapabilityTests {
     @Test("Both edge and pixel-budget bounds must pass", .tags(.upscaling))
     func validatesEdgeAndPixelBudget() {

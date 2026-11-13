@@ -281,8 +281,11 @@ class OverlayManager {
     // MARK: - Window Tracking
 
     private func startTrackingWindow() {
+        // Scheduled on the main run loop, so the callback is already on the main actor.
         trackingTimer = Timer.scheduledTimer(withTimeInterval: 1.0 / 60.0, repeats: true) { [weak self] _ in
-            self?.updateOverlayPosition()
+            MainActor.assumeIsolated {
+                self?.updateOverlayPosition()
+            }
         }
     }
 

@@ -1,6 +1,7 @@
 import Testing
 @testable import MetalDuck
 
+@MainActor
 struct DiagnosticsReportTests {
     @Test("Reports separate advertised limits, skipped tests, and produced frames")
     @MainActor func distinguishesCapabilityAndProcessingResults() {

@@ -1,6 +1,7 @@
 import Testing
 @testable import MetalDuck
 
+@MainActor
 struct InterpolationFallbackTests {
     @Test("Failures lower spatial resolution, then retry plain interpolation", .tags(.upscaling))
     func spatialFailuresReachPlainInterpolation() throws {
