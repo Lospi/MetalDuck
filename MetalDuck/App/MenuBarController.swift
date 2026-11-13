@@ -11,8 +11,10 @@ import Sparkle
 import SwiftUI
 
 @Observable
-class MenuBarController {
+class MenuBarController: NSObject, NSMenuDelegate {
     private var statusItem: NSStatusItem?
+    private var startItem: NSMenuItem?
+    private var stopItem: NSMenuItem?
     private var preferencesWindow: NSWindow?
     var appState: AppState
     private weak var updaterController: SPUStandardUpdaterController?
@@ -20,6 +22,7 @@ class MenuBarController {
     init(appState: AppState, updaterController: SPUStandardUpdaterController) {
         self.appState = appState
         self.updaterController = updaterController
+        super.init()
         setupMenuBar()
     }
 
@@ -32,6 +35,7 @@ class MenuBarController {
         }
 
         let menu = NSMenu()
+        menu.delegate = self
 
         let startItem = NSMenuItem(title: "Start Capture", action: #selector(startCapture), keyEquivalent: "")
         startItem.target = self
@@ -40,6 +44,9 @@ class MenuBarController {
         let stopItem = NSMenuItem(title: "Stop Capture", action: #selector(stopCapture), keyEquivalent: "")
         stopItem.target = self
         menu.addItem(stopItem)
+        self.startItem = startItem
+        self.stopItem = stopItem
+        updateCaptureItems()
 
         menu.addItem(NSMenuItem.separator())
 
@@ -61,6 +68,16 @@ class MenuBarController {
         appState.menuBarItem = statusItem
     }
     
+    /// Only the action that applies right now is shown.
+    private func updateCaptureItems() {
+        startItem?.isHidden = appState.isCapturing
+        stopItem?.isHidden = !appState.isCapturing
+    }
+
+    func menuNeedsUpdate(_ menu: NSMenu) {
+        updateCaptureItems()
+    }
+
     @objc private func checkForUpdates() {
         updaterController?.checkForUpdates(nil)
     }
