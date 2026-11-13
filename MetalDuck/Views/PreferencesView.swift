@@ -128,6 +128,15 @@ struct PreferencesView: View {
 
                     resolutionWarning
 
+                    Toggle("Lower Resolution Automatically", isOn: $upscaleSettings.autoStepDownEnabled)
+
+                    Label(
+                        "If interpolation can't keep up with the capture rate, a lower processing resolution is used until capture stops.",
+                        systemImage: "arrow.down.right.circle"
+                    )
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+
                     Toggle("2x Upscale", isOn: $upscaleSettings.spatialUpscaleEnabled)
 
                     Stepper("Multiplier: \(upscaleSettings.interpolationMultiplier)x",
@@ -191,6 +200,10 @@ struct PreferencesView: View {
             restartCaptureIfNeeded()
         }
         .onChange(of: upscaleSettings.processingResolution) { _, _ in
+            AppCoordinator.shared.updateUpscaleSettings(upscaleSettings)
+            restartCaptureIfNeeded()
+        }
+        .onChange(of: upscaleSettings.autoStepDownEnabled) { _, _ in
             AppCoordinator.shared.updateUpscaleSettings(upscaleSettings)
             restartCaptureIfNeeded()
         }
