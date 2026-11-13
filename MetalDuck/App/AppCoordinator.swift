@@ -52,6 +52,9 @@ class AppCoordinator {
     private var activeProcessingResolution: ProcessingResolution?
     private var activeSpatialUpscaleEnabled: Bool?
     private var interpolationUnsupported = false
+    private var throughputMonitor = InterpolationThroughputMonitor()
+    /// Set when this session lowered the resolution because interpolation was too slow.
+    private var throughputStepDownNote: String?
     private var effectiveCaptureFrameRate = 60
     private var frameRateEstimator = FrameRateEstimator(initialFrameRate: 60)
 
@@ -230,11 +233,14 @@ class AppCoordinator {
                         spatialUpscale: spatialUpscaleEnabled
                     )
                     try await interpolator?.start()
+                    throughputMonitor.reset()
                 }
+                let processingStart = ContinuousClock.now
                 if let outputs = try await interpolator?.process(
                     currentBuffer: frame.pixelBuffer,
                     currentTimestamp: currentPTS
                 ).map(\.buffer) {
+                    let processingTime = ContinuousClock.now - processingStart
                     let isModelReady = await interpolator?.modelReady ?? false
 
                     if isModelReady {
@@ -249,9 +255,10 @@ class AppCoordinator {
                         }
                         let outputFrameCount = max(1, outputs.count)
                         let totalPerInput = spatialUpscaleEnabled ? outputFrameCount : outputFrameCount + 1
-                        appState.processingStatus = spatialUpscaleEnabled
+                        appState.processingStatus = (spatialUpscaleEnabled
                             ? "Interpolating + 2x Upscale (\(totalPerInput) frames/input)"
-                            : "Interpolating (\(totalPerInput) frames/input)"
+                            : "Interpolating (\(totalPerInput) frames/input)")
+                            + (throughputStepDownNote.map { " · \($0)" } ?? "")
 
                         // Calculate evenly spaced offsets for smooth frame pacing
                         let frameDuration = CMTimeGetSeconds(currentPTS) - CMTimeGetSeconds(prevPTS)
@@ -266,6 +273,8 @@ class AppCoordinator {
                             overlay.enqueueBuffer(frame.pixelBuffer, offsetFromNow: step * Double(outputs.count))
                             updateFPS()
                         }
+
+                        await stepDownIfTooSlow(processingTime: processingTime, from: processingResolution)
                     } else if await interpolator?.modelFailed ?? false {
                         await advanceInterpolationFallback()
                         overlay.displayBufferImmediate(frame.pixelBuffer)
@@ -373,7 +382,43 @@ class AppCoordinator {
         }
     }
 
+    /// Lowers the processing resolution for this session when interpolation cannot keep up with
+    /// the capture rate. The resolution chosen in Preferences is left untouched.
+    private func stepDownIfTooSlow(processingTime: Duration, from current: ProcessingResolution) async {
+        guard upscaleSettings.autoStepDownEnabled else { return }
+
+        // In auto capture mode the stream samples at a high ceiling, so judge against the detected
+        // game rate once there is one.
+        let targetFrameRate: Int
+        if captureSettings.autoFrameRateEnabled {
+            guard let estimated = frameRateEstimator.estimatedFrameRate else { return }
+            targetFrameRate = estimated
+        } else {
+            targetFrameRate = effectiveCaptureFrameRate
+        }
+
+        let seconds = Double(processingTime.components.seconds) + Double(processingTime.components.attoseconds) / 1e18
+        guard let median = throughputMonitor.observe(
+            processingTime: seconds,
+            frameInterval: 1.0 / Double(max(1, targetFrameRate))
+        ), let lower = current.lowerResolution else { return }
+
+        await interpolator?.stop()
+        interpolator = nil
+        guard !Task.isCancelled, appState.isCapturing else { return }
+
+        activeProcessingResolution = lower
+        passthroughFrameCount = 0
+        throughputStepDownNote = "\(current.rawValue) too slow, using \(lower.rawValue)"
+        print(String(
+            format: "   🔽 %@ takes %.0f ms per frame, too slow for %d FPS capture — stepping down to %@",
+            current.rawValue, median * 1000, targetFrameRate, lower.rawValue
+        ))
+    }
+
     private func resetRuntimeFallbacks() {
+        throughputMonitor.reset()
+        throughputStepDownNote = nil
         activeProcessingResolution = nil
         activeSpatialUpscaleEnabled = nil
         interpolationUnsupported = false
