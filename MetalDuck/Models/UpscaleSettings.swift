@@ -100,3 +100,32 @@ struct UpscaleSettings: Codable {
         return min(widthScale, heightScale)
     }
 }
+
+// MARK: - Persistence
+
+extension UpscaleSettings {
+    /// The settings saved between launches: the ones Preferences exposes.
+    enum CodingKeys: String, CodingKey {
+        case mode
+        case processingResolution
+        case interpolationMultiplier
+        case spatialUpscaleEnabled
+        case autoStepDownEnabled
+    }
+
+    static let interpolationMultiplierRange = 2...4
+
+    init(from decoder: Decoder) throws {
+        self.init()
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        mode = values.value(.mode, default: mode)
+        processingResolution = values.value(.processingResolution, default: processingResolution)
+        spatialUpscaleEnabled = values.value(.spatialUpscaleEnabled, default: spatialUpscaleEnabled)
+        autoStepDownEnabled = values.value(.autoStepDownEnabled, default: autoStepDownEnabled)
+
+        let range = Self.interpolationMultiplierRange
+        let multiplier = values.value(.interpolationMultiplier, default: interpolationMultiplier)
+        // 2x upscale produces one interpolated frame, so its cadence is fixed at 2x.
+        interpolationMultiplier = spatialUpscaleEnabled ? 2 : min(max(multiplier, range.lowerBound), range.upperBound)
+    }
+}
