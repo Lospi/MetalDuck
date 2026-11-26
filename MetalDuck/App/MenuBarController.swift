@@ -11,7 +11,7 @@ import Sparkle
 import SwiftUI
 
 @Observable
-class MenuBarController: NSObject, NSMenuDelegate {
+class MenuBarController: NSObject, NSMenuDelegate, NSMenuItemValidation {
     private var statusItem: NSStatusItem?
     private var startItem: NSMenuItem?
     private var stopItem: NSMenuItem?
@@ -70,8 +70,17 @@ class MenuBarController: NSObject, NSMenuDelegate {
     
     /// Only the action that applies right now is shown.
     private func updateCaptureItems() {
+        let screenRecordingAvailable = PermissionManager.shared.isScreenRecordingAvailable
         startItem?.isHidden = appState.isCapturing
+        startItem?.title = screenRecordingAvailable ? "Start Capture" : "Screen Recording Unavailable"
         stopItem?.isHidden = !appState.isCapturing
+    }
+
+    func validateMenuItem(_ menuItem: NSMenuItem) -> Bool {
+        if menuItem === startItem {
+            return PermissionManager.shared.isScreenRecordingAvailable
+        }
+        return true
     }
 
     func menuNeedsUpdate(_ menu: NSMenu) {

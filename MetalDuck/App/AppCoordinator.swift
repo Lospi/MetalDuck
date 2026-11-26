@@ -96,6 +96,11 @@ class AppCoordinator {
     func startCapture() async {
         guard !appState.isCapturing, !appState.isStarting else { return }
 
+        guard PermissionManager.shared.isScreenRecordingAvailable else {
+            appState.setError(PermissionManager.screenRecordingUnavailableMessage)
+            return
+        }
+
         if !PermissionManager.shared.hasScreenRecordingPermission {
             let granted = await PermissionManager.shared.requestScreenRecordingPermission()
             if !granted {
@@ -104,6 +109,7 @@ class AppCoordinator {
             }
         }
 
+        appState.setError(nil)
         ensureContentPicker()
 
         if let pickedFilter {
@@ -478,6 +484,10 @@ class AppCoordinator {
     // MARK: - Picker
 
     func presentPicker() {
+        guard PermissionManager.shared.isScreenRecordingAvailable else {
+            appState.setError(PermissionManager.screenRecordingUnavailableMessage)
+            return
+        }
         ensureContentPicker()
         contentPicker?.present()
     }

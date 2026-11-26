@@ -106,6 +106,16 @@ struct PreferencesView: View {
                     Button("Content Picker") {
                         AppCoordinator.shared.presentPicker()
                     }
+                    .disabled(!PermissionManager.shared.isScreenRecordingAvailable)
+                }
+
+                if !PermissionManager.shared.isScreenRecordingAvailable {
+                    Label(
+                        PermissionManager.screenRecordingUnavailableMessage,
+                        systemImage: "exclamationmark.triangle"
+                    )
+                    .font(.caption)
+                    .foregroundColor(.orange)
                 }
             } header: {
                 HeaderView("Capture")

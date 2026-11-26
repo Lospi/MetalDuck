@@ -20,6 +20,10 @@ class ScreenCaptureManager {
 
     /// Starts capturing `filter`, or the target from the settings when no filter is given.
     func startCapture(filter: SCContentFilter? = nil) async throws -> AsyncThrowingStream<CapturedFrame, Error> {
+        guard PermissionManager.shared.isScreenRecordingAvailable else {
+            throw CaptureError.screenRecordingUnavailable
+        }
+
         if !PermissionManager.shared.hasScreenRecordingPermission {
             let granted = await PermissionManager.shared.requestScreenRecordingPermission()
             guard granted else {
@@ -63,8 +67,20 @@ class ScreenCaptureManager {
         return content.displays
     }
 
-    enum CaptureError: Error {
+    enum CaptureError: LocalizedError {
+        case screenRecordingUnavailable
         case permissionDenied
         case sessionNotStarted
+
+        var errorDescription: String? {
+            switch self {
+            case .screenRecordingUnavailable:
+                return PermissionManager.screenRecordingUnavailableMessage
+            case .permissionDenied:
+                return "Screen recording permission is required."
+            case .sessionNotStarted:
+                return "Capture session is not started."
+            }
+        }
     }
 }

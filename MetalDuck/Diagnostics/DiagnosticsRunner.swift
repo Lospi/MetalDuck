@@ -188,8 +188,7 @@ final class DiagnosticsRunner {
 
     /// macOS 27 reports whether screen recording is supported and allowed on this Mac.
     private static func screenRecordingAvailability() -> Bool? {
-        guard #available(macOS 27.0, *) else { return nil }
-        return SCContentSharingPicker.shared.isAvailable
+        PermissionManager.screenRecordingAvailability
     }
 
     /// Reads `gpu-core-count` from the AGXAccelerator IOKit service (Apple Silicon only).
