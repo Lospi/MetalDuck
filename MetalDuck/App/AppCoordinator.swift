@@ -24,9 +24,13 @@ class AppCoordinator {
                 || captureSettings.targetDisplayID != oldValue.targetDisplayID {
                 pickedFilter = nil
             }
+            settingsStore.save(captureSettings)
         }
     }
-    var upscaleSettings = UpscaleSettings()
+    var upscaleSettings = UpscaleSettings() {
+        didSet { settingsStore.save(upscaleSettings) }
+    }
+    private let settingsStore = SettingsStore()
 
     private var videoToolboxUpscaler: VideoToolboxUpscaler?
     private(set) var overlayManager: OverlayManager?
@@ -59,7 +63,10 @@ class AppCoordinator {
     private var frameRateEstimator = FrameRateEstimator(initialFrameRate: 60)
 
     init() {
+        captureSettings = settingsStore.loadCaptureSettings()
+        upscaleSettings = settingsStore.loadUpscaleSettings()
         setupComponents()
+        overlayManager?.showDebugOverlay = settingsStore.showDebugHUD
         setupNotifications()
     }
 
@@ -463,6 +470,7 @@ class AppCoordinator {
     }
 
     func setDebugOverlay(_ visible: Bool) {
+        settingsStore.showDebugHUD = visible
         overlayManager?.showDebugOverlay = visible
     }
 

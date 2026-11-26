@@ -87,7 +87,7 @@ struct PreferencesView: View {
 
                 Stepper("Capture FPS: \(captureSettings.frameRate)",
                         value: $captureSettings.frameRate,
-                        in: 30...120, step: 30)
+                        in: CaptureSettings.frameRateRange, step: CaptureSettings.frameRateStep)
                     .disabled(captureSettings.autoFrameRateEnabled)
 
                 if captureSettings.autoFrameRateEnabled {
@@ -151,7 +151,7 @@ struct PreferencesView: View {
 
                     Stepper("Multiplier: \(upscaleSettings.interpolationMultiplier)x",
                             value: $upscaleSettings.interpolationMultiplier,
-                            in: 2...4, step: 1)
+                            in: UpscaleSettings.interpolationMultiplierRange, step: 1)
                         .disabled(upscaleSettings.spatialUpscaleEnabled)
 
                     if upscaleSettings.spatialUpscaleEnabled {

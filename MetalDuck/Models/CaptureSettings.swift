@@ -83,3 +83,36 @@ struct CaptureSettings: Codable {
         return nil
     }
 }
+
+// MARK: - Persistence
+
+extension CaptureSettings {
+    /// The settings saved between launches. The capture target is session-only, and the capture
+    /// resolution is fixed, so neither is stored.
+    enum CodingKeys: String, CodingKey {
+        case frameRate
+        case autoFrameRateEnabled
+        case useVirtualDisplay
+        case selectedDynamicRangePreset
+    }
+
+    /// Manual capture rates offered in Preferences.
+    static let frameRateRange = 30...120
+    static let frameRateStep = 30
+
+    /// The nearest capture rate Preferences can show.
+    static func validFrameRate(_ frameRate: Int) -> Int {
+        let clamped = min(max(frameRate, frameRateRange.lowerBound), frameRateRange.upperBound)
+        let steps = (Double(clamped) / Double(frameRateStep)).rounded()
+        return Int(steps) * frameRateStep
+    }
+
+    init(from decoder: Decoder) throws {
+        self.init()
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        frameRate = Self.validFrameRate(values.value(.frameRate, default: frameRate))
+        autoFrameRateEnabled = values.value(.autoFrameRateEnabled, default: autoFrameRateEnabled)
+        useVirtualDisplay = values.value(.useVirtualDisplay, default: useVirtualDisplay)
+        selectedDynamicRangePreset = values.value(.selectedDynamicRangePreset, default: selectedDynamicRangePreset)
+    }
+}
