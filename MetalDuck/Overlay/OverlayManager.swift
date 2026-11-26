@@ -28,11 +28,20 @@ class OverlayManager {
 
     // Debug HUD
     private var debugTextField: NSTextField?
+    private var performanceMetricsTask: Task<Void, Never>?
+    private var latestPerformanceMetrics: VideoPerformanceSummary?
+    private var lastDebugLines: [String] = []
+    private var lastDebugIsError = false
     var showDebugOverlay = true {
         didSet {
             if showDebugOverlay {
                 if debugTextField == nil { setupDebugOverlay() }
             } else {
+                performanceMetricsTask?.cancel()
+                performanceMetricsTask = nil
+                latestPerformanceMetrics = nil
+                lastDebugLines = []
+                lastDebugIsError = false
                 debugTextField?.removeFromSuperview()
                 debugTextField = nil
             }
@@ -231,7 +240,7 @@ class OverlayManager {
         processingRes: CGSize?,
         mode: String
     ) {
-        guard showDebugOverlay, let debugTextField else { return }
+        guard showDebugOverlay, debugTextField != nil else { return }
 
         let captureLine: String
         if autoCaptureFPS {
@@ -251,11 +260,46 @@ class OverlayManager {
             lines.append(" Process: \(Int(proc.width))x\(Int(proc.height)) ")
         }
         lines.append(" \(mode) ")
-        debugTextField.stringValue = lines.joined(separator: "\n")
+        lastDebugLines = lines
+        lastDebugIsError = presentationError != nil || status.contains("unsupported")
+        renderDebugHUD()
+        refreshVideoPerformanceMetrics()
+    }
 
-        // Red text when resolution is unsupported
-        let isError = presentationError != nil || status.contains("unsupported")
-        debugTextField.textColor = isError ? .systemRed : .white
+    private func renderDebugHUD() {
+        guard showDebugOverlay, let debugTextField, !lastDebugLines.isEmpty else { return }
+
+        var lines = lastDebugLines
+        if let metrics = latestPerformanceMetrics {
+            lines.append(metrics.hudLine)
+        }
+        debugTextField.stringValue = lines.joined(separator: "\n")
+        // Red text when resolution is unsupported or presentation fails
+        debugTextField.textColor = lastDebugIsError ? .systemRed : .white
+    }
+
+    private func refreshVideoPerformanceMetrics() {
+        guard showDebugOverlay,
+              performanceMetricsTask == nil,
+              let renderer = sampleBufferRenderer
+        else { return }
+
+        performanceMetricsTask = Task { [weak self] in
+            defer {
+                if self?.sampleBufferRenderer === renderer {
+                    self?.performanceMetricsTask = nil
+                }
+            }
+            let metrics = await renderer.videoPerformanceMetrics
+            guard !Task.isCancelled,
+                  let self,
+                  self.showDebugOverlay,
+                  self.sampleBufferRenderer === renderer
+            else { return }
+
+            self.latestPerformanceMetrics = metrics.map(VideoPerformanceSummary.init)
+            self.renderDebugHUD()
+        }
     }
 
     private func setupDebugOverlay() {
@@ -268,7 +312,7 @@ class OverlayManager {
         hudView.isBezeled = false
         hudView.isEditable = false
         hudView.drawsBackground = true
-        hudView.maximumNumberOfLines = 6
+        hudView.maximumNumberOfLines = 8
         hudView.translatesAutoresizingMaskIntoConstraints = false
 
         view.addSubview(hudView)
@@ -289,6 +333,11 @@ class OverlayManager {
         } else {
             sampleBufferRenderer?.flush()
         }
+        performanceMetricsTask?.cancel()
+        performanceMetricsTask = nil
+        latestPerformanceMetrics = nil
+        lastDebugLines = []
+        lastDebugIsError = false
         receiverPresenter = nil
         presentationError = nil
         sampleBufferLayer?.removeFromSuperlayer()
