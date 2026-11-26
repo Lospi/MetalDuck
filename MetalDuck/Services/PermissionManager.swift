@@ -12,9 +12,24 @@ import ScreenCaptureKit
 
 class PermissionManager {
     static let shared = PermissionManager()
-    
+
+    nonisolated static let screenRecordingUnavailableMessage =
+        "Screen recording is not available on this Mac. Check Screen Time or device management restrictions."
+
     private init() {}
-    
+
+    /// macOS 27 reports whether screen recording is supported and allowed on this Mac.
+    /// Returns `nil` on older macOS versions where the OS cannot answer.
+    static var screenRecordingAvailability: Bool? {
+        guard #available(macOS 27.0, *) else { return nil }
+        return SCContentSharingPicker.shared.isAvailable
+    }
+
+    /// False only when the OS explicitly reports that screen recording is unavailable.
+    var isScreenRecordingAvailable: Bool {
+        Self.screenRecordingAvailability ?? true
+    }
+
     var hasScreenRecordingPermission: Bool {
         CGPreflightScreenCaptureAccess()
     }

@@ -256,35 +256,11 @@ actor RealTimeFrameInterpolation {
     /// Feeds one frame pair to VideoToolbox and waits for every output frame.
     private func runProcessor(_ parameters: VTLowLatencyFrameInterpolationParameters) async throws -> [SendablePixelBuffer] {
         var outputs: [SendablePixelBuffer] = []
-        var firstError: Error?
         for try await readOnlyFrame in frameProcessor.process(parameters: parameters) {
-            // Keep draining after a failure so no output handler outlives this call.
-            guard firstError == nil else { continue }
-            do {
-                let processedBuffer = try readOnlyFrame.frame.withUnsafeBuffer { readOnlyPixelBuffer -> SendablePixelBuffer in
-                    let output = try Self.createPixelBuffer(from: pixelBufferPool)
-
-                    var copySession: VTPixelTransferSession?
-                    guard VTPixelTransferSessionCreate(allocator: kCFAllocatorDefault,
-                                                      pixelTransferSessionOut: &copySession) == noErr,
-                          let session = copySession
-                    else {
-                        throw Fault.failedToCreateOutputBuffer
-                    }
-
-                    let status = VTPixelTransferSessionTransferImage(session, from: readOnlyPixelBuffer, to: output)
-                    VTPixelTransferSessionInvalidate(session)
-                    guard status == noErr else {
-                        throw Fault.failedToTransferImage
-                    }
-                    return SendablePixelBuffer(buffer: output)
-                }
-                outputs.append(processedBuffer)
-            } catch {
-                firstError = error
-            }
+            // Each yielded frame wraps a destination buffer from `pixelBufferPool`; retain it
+            // directly instead of copying via a per-frame VTPixelTransferSession.
+            outputs.append(readOnlyFrame.frame.withUnsafeBuffer { SendablePixelBuffer(buffer: $0) })
         }
-        if let firstError { throw firstError }
         return outputs
     }
 

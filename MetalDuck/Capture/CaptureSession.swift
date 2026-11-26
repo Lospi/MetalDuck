@@ -14,6 +14,7 @@ class CaptureSession {
     private var stream: SCStream?
     private var streamConfig: SCStreamConfiguration?
     private var streamOutput: StreamOutput?
+    private var streamDelegate: CaptureStreamDelegate?
     private let settings: CaptureSettings
 
     private var continuation: AsyncThrowingStream<CapturedFrame, Error>.Continuation?
@@ -51,9 +52,11 @@ class CaptureSession {
         let (frameStream, continuation) = AsyncThrowingStream.makeStream(of: CapturedFrame.self)
         self.continuation = continuation
 
+        let delegate = CaptureStreamDelegate(continuation: continuation)
+        streamDelegate = delegate
         streamOutput = StreamOutput(continuation: continuation)
 
-        stream = SCStream(filter: contentFilter, configuration: streamConfig, delegate: nil)
+        stream = SCStream(filter: contentFilter, configuration: streamConfig, delegate: delegate)
 
         try stream?.addStreamOutput(
             streamOutput!,
@@ -82,16 +85,29 @@ class CaptureSession {
     }
 
     func stop() async {
-        do {
-            try await stream?.stopCapture()
-        } catch {
-            print("Error stopping capture: \(error.localizedDescription)")
+        let alreadyStopped = streamDelegate?.didStopExternally ?? false
+        let shouldStopStream: Bool
+        if alreadyStopped {
+            shouldStopStream = false
+        } else if #available(macOS 27.0, *), let stream {
+            shouldStopStream = stream.isCapturing
+        } else {
+            shouldStopStream = stream != nil
+        }
+
+        if shouldStopStream {
+            do {
+                try await stream?.stopCapture()
+            } catch {
+                print("Error stopping capture: \(error.localizedDescription)")
+            }
         }
         continuation?.finish()
         continuation = nil
         stream = nil
         streamConfig = nil
         streamOutput = nil
+        streamDelegate = nil
     }
 
     enum CaptureError: Error {
