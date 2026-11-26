@@ -137,6 +137,7 @@ class AppCoordinator {
 
         do {
             let stream = try await manager.startCapture(filter: filter)
+            appState.setError(nil)
             appState.startCapture()
 
             interpolator = nil
@@ -145,22 +146,47 @@ class AppCoordinator {
             createDisplayForCapture(overlay: overlay, usesPickedContent: filter != nil)
 
             captureTask = Task { [weak self] in
-                do {
-                    for try await frame in stream {
-                        await self?.processFrame(frame)
-                    }
-                } catch {
-                    await MainActor.run {
+                await Self.runCaptureLoop(
+                    stream: stream,
+                    isCurrentSession: { self?.captureManager === manager },
+                    onFrame: { frame in await self?.processFrame(frame) },
+                    onError: { error in
                         self?.appState.setError("Capture stream error: \(error.localizedDescription)")
-                    }
-                    await self?.stopCapture()
-                }
+                    },
+                    onStop: { await self?.stopCapture() }
+                )
             }
         } catch {
+            if captureManager === manager {
+                captureManager = nil
+            }
             appState.cancelStarting()
             // The picked content may no longer exist; ask again on the next start.
             if filter != nil { pickedFilter = nil }
             appState.setError("Failed to start capture: \(error.localizedDescription)")
+        }
+    }
+
+    /// Consumes a capture stream and tears down the session if the stream ends externally.
+    /// Guards against cancelled tasks or stale sessions stopping a subsequently started capture.
+    static func runCaptureLoop<Frame>(
+        stream: AsyncThrowingStream<Frame, Error>,
+        isCurrentSession: @escaping @MainActor () -> Bool,
+        onFrame: @escaping @MainActor (Frame) async -> Void,
+        onError: @escaping @MainActor (Error) -> Void,
+        onStop: @escaping @MainActor () async -> Void
+    ) async {
+        do {
+            for try await frame in stream {
+                guard !Task.isCancelled, isCurrentSession() else { return }
+                await onFrame(frame)
+            }
+            guard !Task.isCancelled, isCurrentSession() else { return }
+            await onStop()
+        } catch {
+            guard !Task.isCancelled, isCurrentSession() else { return }
+            onError(error)
+            await onStop()
         }
     }
 
@@ -174,12 +200,14 @@ class AppCoordinator {
         captureTask = nil
         task?.cancel()
 
-        await captureManager?.stopCapture()
+        let manager = captureManager
         captureManager = nil
+        await manager?.stopCapture()
 
         // Stop the interpolator's VTFrameProcessor session
-        await interpolator?.stop()
+        let currentInterpolator = interpolator
         interpolator = nil
+        await currentInterpolator?.stop()
 
         overlayManager?.close()
         lastFrameTimestamp = nil
